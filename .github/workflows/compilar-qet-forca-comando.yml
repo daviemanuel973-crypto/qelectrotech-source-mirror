@@ -1,0 +1,141 @@
+name: Compilar QET com identificacao de fios
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - name: Baixar o codigo QET deste repositorio
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Instalar ambiente Windows (MSYS2, Qt6 e KDE6)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          cache: true
+          install: >-
+            git
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-qt6-base
+            mingw-w64-ucrt-x86_64-qt6-svg
+            mingw-w64-ucrt-x86_64-qt6-tools
+            mingw-w64-ucrt-x86_64-qt6-translations
+            mingw-w64-ucrt-x86_64-qt6-pdf
+            mingw-w64-ucrt-x86_64-sqlite3
+            mingw-w64-ucrt-x86_64-pkg-config
+            mingw-w64-ucrt-x86_64-kwidgetsaddons
+            mingw-w64-ucrt-x86_64-kcoreaddons
+            mingw-w64-ucrt-x86_64-extra-cmake-modules
+            mingw-w64-ucrt-x86_64-angleproject
+            mingw-w64-ucrt-x86_64-qt6-declarative
+
+      - name: Aplicar alteracao nativa de identificacao de fios
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          git apply --check qet-native-forca-comando.patch
+          git apply qet-native-forca-comando.patch
+          grep -q 'AutoWireProperties::run' sources/qetdiagrameditor.cpp
+          echo 'Patch integrado ao menu Editar.'
+
+      - name: Compilar o executavel QElectroTech.exe
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH=/ucrt64 \
+            -DQt6_DIR=/ucrt64/lib/cmake/Qt6 \
+            -DQT_VERSION_MAJOR=6 \
+            -DBUILD_WITH_KF=ON \
+            -DBUILD_KF=OFF \
+            -DPACKAGE_TESTS=OFF \
+            -DCMAKE_POLICY_DEFAULT_CMP0077=NEW \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+            -DQET_EXPORT_PROJECT_DB=ON \
+            -DQET_ENABLE_SPACEMOUSE=OFF \
+            -DSQLite3_INCLUDE_DIR=/ucrt64/include \
+            -DSQLite3_LIBRARY=/ucrt64/lib/libsqlite3.dll.a
+          cmake --build build --parallel 4
+          EXE=$(find "$GITHUB_WORKSPACE/build" -maxdepth 3 -iname 'qelectrotech.exe' | head -1)
+          test -n "$EXE"
+          test -s "$EXE"
+          echo "Executavel compilado: $EXE"
+
+      - name: Rodar testes automatizados disponiveis
+        shell: msys2 {0}
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/build"
+          ctest --output-on-failure --timeout 300
+
+      - name: Gerar pasta portatil Windows com dependencias
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          DEST="$GITHUB_WORKSPACE/QET-ForcaComando-Portatil"
+          mkdir -p "$DEST/bin" "$DEST/conf" "$DEST/lang"
+          EXE=$(find "$GITHUB_WORKSPACE/build" -maxdepth 3 -iname 'qelectrotech.exe' | head -1)
+          cp "$EXE" "$DEST/bin/QElectroTech.exe"
+          cd "$DEST/bin"
+          /ucrt64/bin/windeployqt6 --release --no-translations --no-compiler-runtime ./QElectroTech.exe
+          # Pacote C++ MinGW
+          cp /ucrt64/bin/libgcc_s_seh-1.dll .
+          cp /ucrt64/bin/libstdc++-6.dll .
+          cp /ucrt64/bin/libwinpthread-1.dll .
+          # DLLs transitivas, conforme pratica do workflow oficial Windows do QET.
+          for pass in 1 2 3; do
+            for f in ./*.dll ./*.exe ./sqldrivers/*.dll ./platforms/*.dll ./imageformats/*.dll; do
+              test -f "$f" || continue
+              while IFS= read -r dll; do
+                test -f "$dll" || continue
+                cp -n "$dll" . || true
+              done < <(ldd "$f" 2>/dev/null | awk '/=> \/ucrt64\/bin\// {print $3}')
+            done
+          done
+          cp -r "$GITHUB_WORKSPACE/elements" "$DEST/elements"
+          cp -r "$GITHUB_WORKSPACE/titleblocks" "$DEST/titleblocks"
+          cp -r "$GITHUB_WORKSPACE/fonts" "$DEST/fonts" || true
+          cp -r "$GITHUB_WORKSPACE/examples" "$DEST/examples" || true
+          cp "$GITHUB_WORKSPACE/misc/Lancer QET_qt6.bat" "$DEST/Abrir QElectroTech.bat"
+          find "$GITHUB_WORKSPACE/build/lang" -maxdepth 1 -name 'qet_*.qm' -exec cp {} "$DEST/lang/" \; 2>/dev/null || true
+          for file in "$GITHUB_WORKSPACE"/LICENSE* "$GITHUB_WORKSPACE"/ELEMENTS.LICENSE; do
+            test -f "$file" && cp "$file" "$DEST/" || true
+          done
+          test -s "$DEST/bin/QElectroTech.exe"
+          test -d "$DEST/elements"
+          echo 'Pacote portatil preparado.'
+
+      - name: Disponibilizar download do aplicativo Windows
+        uses: actions/upload-artifact@v4
+        with:
+          name: QET-ForcaComando-Windows-Portatil
+          path: QET-ForcaComando-Portatil/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Guardar logs se a compilacao falhar
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: QET-compilacao-logs
+          path: |
+            build/CMakeFiles/*.log
+            build/Testing/Temporary/*.log
+          if-no-files-found: ignore
