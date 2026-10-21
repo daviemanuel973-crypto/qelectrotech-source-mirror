@@ -30,7 +30,7 @@ diff --git a/sources/automation/autowireproperties.h b/sources/automation/autowi
 new file mode 100644
 --- /dev/null
 +++ b/sources/automation/autowireproperties.h
-@@ -0,0 +1,441 @@
+@@ -0,0 +1,521 @@
 +/*
 + * QElectroTech - automatic educational power/control wire properties.
 + * Copyright 2026. Distributed under GPL-2.0-or-later, compatible with QET.
@@ -82,6 +82,8 @@ new file mode 100644
 +    int failed = 0;
 +    int inferredByPotential = 0;
 +    int conflictingPotentials = 0;
++    int sizedConductors = 0;
++    int preservedOutOfScope = 0;
 +    double proposedPowerSection = 0.;
 +    QStringList details;
 +};
@@ -140,6 +142,15 @@ new file mode 100644
 +            auxiliary)
 +            control = true;
 +    }
++    // Existing explicit function is strong evidence, unlike the drawing colour.
++    // Respect it but never force a result when component evidence disagrees.
++    const QString declared = c->properties().m_function.trimmed().toUpper();
++    if (declared == QStringLiteral("PE") || declared == QStringLiteral("P.E.")) earth = true;
++    else if (declared == QStringLiteral("N")) neutral = true;
++    else if (declared == QStringLiteral("L1") ||
++             declared == QStringLiteral("L2") ||
++             declared == QStringLiteral("L3")) power = true;
++
 +    // Legacy diagrams sometimes represent PE as a green (#00aa00)
 +    // line connected to anonymous "i"/"Jump" terminals. Colour alone
 +    // is a heuristic, not electrical proof, so reject conflicts with
@@ -182,7 +193,7 @@ new file mode 100644
 +
 +inline ConductorProperties proposal(const Conductor *c, Role role,
 +                                    const QetWirePrecalc::Output &sizing,
-+                                    bool overwrite) {
++                                    bool overwrite, bool selectedCircuit) {
 +    ConductorProperties props = c->properties();
 +    // Only fill technical fields that are blank. Do not touch label, formula,
 +    // text visibility, wire drawing colour, routing or geometry.
@@ -193,7 +204,10 @@ new file mode 100644
 +        section = 1.5; // educational control circuit baseline
 +    else if (role == Role::Earth)
 +        section = QetWirePrecalc::peSection(sizing.sectionMm2);
-+    if (section > 0. && (overwrite || props.m_wire_section.trimmed().isEmpty()))
++    // The single V/I/P input describes ONE circuit, not every pump/feeder
++    // in the project. Never assign its section outside the chosen circuit.
++    if (selectedCircuit && section > 0. &&
++        (overwrite || props.m_wire_section.trimmed().isEmpty()))
 +        props.m_wire_section = sectionText(section);
 +
 +    QString color;
@@ -201,11 +215,12 @@ new file mode 100644
 +    else if (role == Role::Control) color = QStringLiteral("Vermelho");
 +    else if (role == Role::Neutral) color = QStringLiteral("Azul-claro");
 +    else if (role == Role::Earth) color = QStringLiteral("Verde/amarelo");
-+    if (!color.isEmpty() && (overwrite || props.m_wire_color.trimmed().isEmpty()))
++    if (!color.isEmpty() && ((overwrite && selectedCircuit) ||
++                             props.m_wire_color.trimmed().isEmpty()))
 +        props.m_wire_color = color;
 +
 +    // The motor supply voltage is not necessarily the control voltage.
-+    if ((role == Role::Power || role == Role::Neutral) &&
++    if (selectedCircuit && (role == Role::Power || role == Role::Neutral) &&
 +        (overwrite || props.m_tension_protocol.trimmed().isEmpty()))
 +        props.m_tension_protocol = QString::number(sizing.voltage, 'f', 1) + QStringLiteral(" V");
 +    if (props.m_function.trimmed().isEmpty()) {
@@ -215,12 +230,14 @@ new file mode 100644
 +                 props.color == QColor(QStringLiteral("#00aa00")))
 +            props.m_function = QStringLiteral("PE");
 +    }
-+    // Deliberately do not assume voltage/protocol or protective conductor section.
++    // Fields assigned outside the selected circuit are limited to
++    // classification metadata; their size and voltage remain untouched.
 +    return props;
 +}
 +
 +inline Result apply(QETProject *project, const QetWirePrecalc::Output &sizing,
-+                    bool overwrite = false) {
++                    bool overwrite = false, bool allCircuitsSameLoad = false,
++                    bool classificationOnly = false) {
 +    Result result;
 +    if (!sizing.valid || !sizing.withinTable ||
 +        !project || project->isReadOnly() || !project->undoStack()) return result;
@@ -235,11 +252,24 @@ new file mode 100644
 +    // drawing colour by itself does not establish a complete circuit.
 +    QHash<Conductor *, Role> direct, resolved;
 +    QSet<Conductor *> available;
++    QSet<Conductor *> selectedCircuit;
 +    for (Conductor *c : wires) {
 +        if (!c) continue;
 +        available.insert(c);
 +        direct.insert(c, classify(c));
 +    }
++
++    // User-selected wires are explicit sizing targets. Include their exact
++    // continuous potentials, but NEVER cross a contactor, fuse, switch,
++    // motor or function-isolating terminal to another electrical circuit.
++    for (Conductor *c : wires) {
++        if (!c || !c->isSelected()) continue;
++        selectedCircuit.insert(c);
++        selectedCircuit.unite(c->relatedPotentialConductors(true));
++    }
++    selectedCircuit.intersect(available);
++    if (allCircuitsSameLoad) selectedCircuit = available;
++    if (classificationOnly) selectedCircuit.clear();
 +
 +    // Stage 2: the QET engine already knows the *electrically continuous*
 +    // groups. Propagate only if all classified members of the potential
@@ -263,8 +293,10 @@ new file mode 100644
 +        for (Conductor *member : std::as_const(potential)) {
 +            visited.insert(member);
 +            const Role seed = direct.value(member, Role::Unknown);
-+            const Role finalRole = seed != Role::Unknown ? seed :
-+                conflict ? Role::Unknown : agreed;
++            // A contradiction in one electric potential invalidates any
++            // automatic classification in that group, not only its blank wires.
++            const Role finalRole = conflict ? Role::Unknown :
++                                   (seed != Role::Unknown ? seed : agreed);
 +            if (seed == Role::Unknown && finalRole != Role::Unknown)
 +                ++result.inferredByPotential;
 +            resolved.insert(member, finalRole);
@@ -282,7 +314,11 @@ new file mode 100644
 +            case Role::Unknown: ++result.unknown; continue;
 +        }
 +        const ConductorProperties before = c->properties();
-+        const ConductorProperties after = proposal(c, role, sizing, overwrite);
++        const bool inCircuit = selectedCircuit.contains(c);
++        const ConductorProperties after = proposal(c, role, sizing, overwrite, inCircuit);
++        if (!inCircuit) ++result.preservedOutOfScope;
++        if (inCircuit && after.m_wire_section != before.m_wire_section)
++            ++result.sizedConductors;
 +        if (before == after) { ++result.kept; continue; }
 +        new QPropertyUndoCommand(c, "properties",
 +                                 QVariant::fromValue(before),
@@ -299,7 +335,8 @@ new file mode 100644
 +        const ConductorProperties &wanted = item.second;
 +        const bool ok = actual.m_wire_section == wanted.m_wire_section &&
 +                        actual.m_wire_color == wanted.m_wire_color &&
-+                        actual.m_function == wanted.m_function;
++                        actual.m_function == wanted.m_function &&
++                        actual.m_tension_protocol == wanted.m_tension_protocol;
 +        if (ok) ++result.verified;
 +        else ++result.failed;
 +        result.details << QObject::tr("Fio %1 — seção: %2; cor: %3; função: %4 — %5")
@@ -360,8 +397,26 @@ new file mode 100644
 +    form->addRow(QObject::tr("Fator de potência (cos φ):"), pf);
 +    form->addRow(QObject::tr("Comprimento de ida do circuito:"), length);
 +    form->addRow(QObject::tr("Queda máxima admitida:"), drop);
++    int selectedWires = 0;
++    for (Diagram *d : project->diagrams())
++        if (d)
++            for (Conductor *c : DiagramContent(d, false).conductors())
++                if (c && c->isSelected()) ++selectedWires;
++    auto *scope = new QComboBox;
++    scope->addItem(QObject::tr("Dimensionar apenas os fios selecionados e o mesmo potencial"));
++    scope->addItem(QObject::tr("Apenas identificar fios, sem dimensionar"));
++    scope->addItem(QObject::tr("Todos os fios do projeto (mesma carga, avançado)"));
++    if (!selectedWires) scope->setCurrentIndex(1);
++    form->addRow(QObject::tr("Escopo do cálculo:"), scope);
++    auto *scopeHelp = new QLabel(QObject::tr(
++        "Fios selecionados: %1. Para quadros com várias bombas, selecione "
++        "os condutores de UM circuito antes de calcular. A identificação "
++        "de força/comando/PE continuará procurando no projeto inteiro.")
++        .arg(selectedWires));
++    scopeHelp->setWordWrap(true);
++    layout->addWidget(scopeHelp);
 +    auto *overwrite = new QCheckBox(QObject::tr(
-+        "Sobrescrever seções, cores e tensão já preenchidas (inclusive manualmente)"));
++        "Sobrescrever propriedades já preenchidas APENAS no circuito dimensionado"));
 +    layout->addWidget(overwrite);
 +    auto *preview = new QLabel;
 +    preview->setWordWrap(true);
@@ -402,21 +457,30 @@ new file mode 100644
 +            if (known == 1) { QSignalBlocker b(current); current->setValue(latest.current); }
 +            if (known == 2) { QSignalBlocker b(voltage); voltage->setValue(latest.voltage); }
 +        }
-+        const bool ok = latest.valid && latest.withinTable;
++        const bool wantsSizing = scope->currentIndex() != 1;
++        const bool hasCircuit = scope->currentIndex() != 0 || selectedWires > 0;
++        const bool ok = latest.valid && latest.withinTable &&
++                        (!wantsSizing || hasCircuit);
 +        buttons->button(QDialogButtonBox::Ok)->setEnabled(ok);
 +        if (!latest.valid) preview->setText(QObject::tr("Valores inválidos."));
 +        else if (!latest.withinTable)
 +            preview->setText(QObject::tr("Corrente ou queda de tensão fora da tabela preliminar até 120 mm²."));
 +        else preview->setText(QObject::tr(
-+            "Resultado: %1 V / %2 A / %3 kW; força sugerida: %4; "
-+            "queda aproximada: %5%; comando didático: 1,5 mm².")
++            "Resultado: %1 V / %2 A / %3 kW; seção PRELIMINAR de força: %4; "
++            "queda aproximada: %5%. %6")
 +                .arg(latest.voltage, 0, 'f', 1).arg(latest.current, 0, 'f', 2)
 +                .arg(latest.power / 1000., 0, 'f', 3)
 +                .arg(sectionText(latest.sectionMm2))
-+                .arg(latest.dropPercent, 0, 'f', 2));
++                .arg(latest.dropPercent, 0, 'f', 2)
++                .arg(scope->currentIndex() == 1 ?
++                    QObject::tr("Nenhuma seção/tensão será gravada.") :
++                    scope->currentIndex() == 0 ?
++                    QObject::tr("Seção/tensão apenas nos potenciais selecionados.") :
++                    QObject::tr("ATENÇÃO: o cálculo será aplicado a todos os circuitos.")));
 +    };
 +    QObject::connect(supply, QOverload<int>::of(&QComboBox::currentIndexChanged), &dialog, refresh);
 +    QObject::connect(pair, QOverload<int>::of(&QComboBox::currentIndexChanged), &dialog, refresh);
++    QObject::connect(scope, QOverload<int>::of(&QComboBox::currentIndexChanged), &dialog, refresh);
 +    for (QDoubleSpinBox *w : {voltage, current, power, pf, length, drop})
 +        QObject::connect(w, QOverload<double>::of(&QDoubleSpinBox::valueChanged), &dialog, refresh);
 +    refresh();
@@ -424,19 +488,35 @@ new file mode 100644
 +    // The data are derived again from the final widget values.
 +    refresh();
 +    if (!latest.valid || !latest.withinTable) return;
-+    const Result r = apply(project, latest, overwrite->isChecked());
++    if (scope->currentIndex() == 2 &&
++        QMessageBox::warning(parent,
++            QObject::tr("Dimensionamento global não verificado"),
++            QObject::tr("Este projeto pode conter cargas, motores e tensões diferentes. "
++                        "Aplicar a MESMA corrente e seção a todos os circuitos não "
++                        "é um dimensionamento elétrico seguro. Continuar mesmo assim?"),
++            QMessageBox::Yes | QMessageBox::No,
++            QMessageBox::No) != QMessageBox::Yes)
++        return;
++    // Index 1 is classification-only; never use circuit sizing there.
++    const bool allCircuits = scope->currentIndex() == 2;
++    const bool classificationOnly = scope->currentIndex() == 1;
++    const Result r = apply(project, latest, overwrite->isChecked(),
++                           allCircuits, classificationOnly);
 +    QMessageBox message(QMessageBox::Information, QObject::tr("Pré-dimensionamento aplicado"),
 +        QObject::tr("Seção de força sugerida: %1\n"
 +                    "Força: %2 | Comando: %3 | Neutro: %4 | PE: %5\n"
 +                    "Não classificados: %6 | Atualizados: %7 | Sem alteração: %8\n"
 +                    "Gravações verificadas: %9 | Falhas de gravação: %10\n"
 +                    "Classificados pela continuidade elétrica: %11\n"
-+                    "Grupos com evidências conflitantes: %12\n\n"
++                    "Grupos com evidências conflitantes: %12\n"
++                    "Bitolas atribuídas no escopo: %13\n"
++                    "Fios classificados fora do escopo de bitola: %14\n\n"
 +                    "Abra Editar → Ver características técnicas dos fios para conferir.")
 +            .arg(sectionText(r.proposedPowerSection))
 +            .arg(r.power).arg(r.control).arg(r.neutral).arg(r.earth)
 +            .arg(r.unknown).arg(r.modified).arg(r.kept).arg(r.verified).arg(r.failed)
-+            .arg(r.inferredByPotential).arg(r.conflictingPotentials),
++            .arg(r.inferredByPotential).arg(r.conflictingPotentials)
++            .arg(r.sizedConductors).arg(r.preservedOutOfScope),
 +        QMessageBox::Ok, parent);
 +    if (r.failed) message.setIcon(QMessageBox::Warning);
 +    if (!r.details.isEmpty()) message.setDetailedText(r.details.join(QStringLiteral("\n")));
