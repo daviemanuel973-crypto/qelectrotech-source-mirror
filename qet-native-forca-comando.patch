@@ -30,7 +30,7 @@ diff --git a/sources/automation/autowireproperties.h b/sources/automation/autowi
 new file mode 100644
 --- /dev/null
 +++ b/sources/automation/autowireproperties.h
-@@ -0,0 +1,521 @@
+@@ -0,0 +1,540 @@
 +/*
 + * QElectroTech - automatic educational power/control wire properties.
 + * Copyright 2026. Distributed under GPL-2.0-or-later, compatible with QET.
@@ -202,8 +202,11 @@ new file mode 100644
 +        section = sizing.sectionMm2;
 +    else if (role == Role::Control)
 +        section = 1.5; // educational control circuit baseline
++    // PE sizing depends on material, mechanical protection, installation
++    // and fault-loop/protective-device data. Never infer it from a global
++    // motor current, even if the selected circuit carries that PE.
 +    else if (role == Role::Earth)
-+        section = QetWirePrecalc::peSection(sizing.sectionMm2);
++        section = 0.;
 +    // The single V/I/P input describes ONE circuit, not every pump/feeder
 +    // in the project. Never assign its section outside the chosen circuit.
 +    if (selectedCircuit && section > 0. &&
@@ -378,9 +381,12 @@ new file mode 100644
 +        w->setValue(initial);
 +        return w;
 +    };
-+    auto *voltage = numeric(220., 0.01, 100000., 2);
-+    auto *current = numeric(10., 0.01, 100000., 3);
-+    auto *power = numeric(3., 0.01, 100000., 3); // kW
++    // Tiny control loads can have milliwatts or microamps; the former
++    // 0.01 kW minimum silently rounded computed watt values upward
++    // when switching from V+I to V+P. Higher precision prevents this.
++    auto *voltage = numeric(220., 0.000001, 1000000., 6);
++    auto *current = numeric(10., 0.000001, 1000000., 6);
++    auto *power = numeric(3., 0.000000001, 1000000., 9); // kW
 +    auto *pf = numeric(0.85, 0.01, 1.0, 2);
 +    auto *length = numeric(20., 0., 50000., 1);
 +    auto *drop = numeric(4., 0.1, 15., 1);
@@ -424,8 +430,9 @@ new file mode 100644
 +    auto *note = new QLabel(QObject::tr(
 +        "PRÉ-DIMENSIONAMENTO DIDÁTICO: cobre/PVC 70 °C, método B1, 30 °C, "
 +        "sem agrupamento. Não verifica proteção, partida de motor ou todas as "
-+        "exigências da NBR 5410. Para potência mecânica de placa de motor, "
-+        "também é necessário considerar o rendimento (η)."));
++        "exigências da NBR 5410. PE não recebe bitola automática. "
++        "Para potência mecânica de placa de motor, é necessário considerar "
++        "o rendimento (η)."));
 +    note->setWordWrap(true);
 +    layout->addWidget(note);
 +    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
@@ -457,14 +464,26 @@ new file mode 100644
 +            if (known == 1) { QSignalBlocker b(current); current->setValue(latest.current); }
 +            if (known == 2) { QSignalBlocker b(voltage); voltage->setValue(latest.voltage); }
 +        }
++        // Prevent Qt spin boxes from silently clipping an out-of-range
++        // computed quantity. A clipped value could become an unintended
++        // input when the user changes the known-pair selector.
++        const bool outputFits = latest.valid &&
++            (known != 0 || (latest.power / 1000. >= power->minimum() &&
++                            latest.power / 1000. <= power->maximum())) &&
++            (known != 1 || (latest.current >= current->minimum() &&
++                            latest.current <= current->maximum())) &&
++            (known != 2 || (latest.voltage >= voltage->minimum() &&
++                            latest.voltage <= voltage->maximum()));
 +        const bool wantsSizing = scope->currentIndex() != 1;
 +        const bool hasCircuit = scope->currentIndex() != 0 || selectedWires > 0;
-+        const bool ok = latest.valid && latest.withinTable &&
++        const bool ok = latest.valid && latest.withinTable && outputFits &&
 +                        (!wantsSizing || hasCircuit);
 +        buttons->button(QDialogButtonBox::Ok)->setEnabled(ok);
 +        if (!latest.valid) preview->setText(QObject::tr("Valores inválidos."));
 +        else if (!latest.withinTable)
 +            preview->setText(QObject::tr("Corrente ou queda de tensão fora da tabela preliminar até 120 mm²."));
++        else if (!outputFits)
++            preview->setText(QObject::tr("Resultado fora da faixa permitida no campo calculado; reduza os valores."));
 +        else preview->setText(QObject::tr(
 +            "Resultado: %1 V / %2 A / %3 kW; seção PRELIMINAR de força: %4; "
 +            "queda aproximada: %5%. %6")
