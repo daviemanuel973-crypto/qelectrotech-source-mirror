@@ -68,6 +68,15 @@ int main(int argc, char **argv) {
         require(calc.valid && calc.withinTable && calc.sectionMm2>0., "preliminary sizing");
         const auto result=AutoWireProperties::apply(&project, calc);
         require(result.failed==0, "all requests verified after application");
+        // No selection means no global sizing: multiple motors may have
+        // different load currents and voltages even on the same panel.
+        require(result.sizedConductors==0,"unselected projects are never globally sized");
+        for (Conductor *c : wires) {
+            require(c->properties().m_wire_section == old.value(c).m_wire_section,
+                    "no new section on an unselected circuit");
+            require(c->properties().m_tension_protocol == old.value(c).m_tension_protocol,
+                    "no global feeder voltage on an unselected circuit");
+        }
         require(result.power + result.control + result.earth + result.neutral +
                 result.unknown == wires.size(), "every conductor classified once");
         for (Conductor *c : wires) {
@@ -81,6 +90,52 @@ int main(int argc, char **argv) {
             project.undoStack()->redo();
             require(result.failed==0,"redo succeeded");
         }
+
+        // A user selection sizes only its exact electric potential. The
+        // legacy project contains unrelated feeders and motor branches.
+        Conductor *selectedPower=nullptr;
+        for (Conductor *candidate : wires) {
+            if (AutoWireProperties::classify(candidate)==AutoWireProperties::Role::Power) {
+                selectedPower=candidate; break;
+            }
+        }
+        require(selectedPower!=nullptr,"fixture contains a recognized power conductor");
+        selectedPower->setSelected(true);
+        QHash<Conductor *,ConductorProperties> previousSelection;
+        for (Conductor *c : wires) previousSelection.insert(c,c->properties());
+        const auto sized=AutoWireProperties::apply(&project,calc,true);
+        require(sized.failed==0 && sized.sizedConductors>0,
+                "sizing selected power potential was persisted");
+        QSet<Conductor *> selectedPotential=selectedPower->relatedPotentialConductors(true);
+        selectedPotential.insert(selectedPower);
+        for (Conductor *c : wires) {
+            if (selectedPotential.contains(c)) continue;
+            require(c->properties().m_wire_section==previousSelection.value(c).m_wire_section,
+                    "unrelated circuit section not overwritten");
+            require(c->properties().m_tension_protocol==previousSelection.value(c).m_tension_protocol,
+                    "unrelated circuit voltage not overwritten");
+        }
+        project.undoStack()->undo();
+        for (Conductor *c : wires)
+            require(c->properties()==previousSelection.value(c),
+                    "selected circuit update fully undone");
+        selectedPower->setSelected(false);
+
+        // A single explicit project annotation is authoritative only
+        // where it does not contradict device/terminal evidence.
+        bool explicitPeObserved=false;
+        for (Conductor *candidate : wires) {
+            if (AutoWireProperties::classify(candidate)!=AutoWireProperties::Role::Unknown)
+                continue;
+            const auto original=candidate->properties();
+            auto annotated=original; annotated.m_function=QStringLiteral("PE");
+            candidate->setProperties(annotated);
+            if (AutoWireProperties::classify(candidate)==AutoWireProperties::Role::Earth)
+                explicitPeObserved=true;
+            candidate->setProperties(original);
+            if (explicitPeObserved) break;
+        }
+        require(explicitPeObserved,"explicit PE annotation classifies a compatible wire");
 
         // Independent controlled metadata test, even if the fixture has no
         // recognizable power/control elements for the classifier.
@@ -137,7 +192,9 @@ int main(int argc, char **argv) {
                         sawDialog=true;
                         const auto combos=d->findChildren<QComboBox*>();
                         const auto fields=d->findChildren<QDoubleSpinBox*>();
-                        require(combos.size()==2,"supply/input combination controls shown");
+                        require(combos.size()==3,"supply, pair and safe sizing scope shown");
+                        require(combos.at(2)->currentIndex()==1,
+                                "with no selection the default is classification only");
                         require(fields.size()==6,"all six electrical quantities shown");
                         combos.at(0)->setCurrentIndex(0);
                         combos.at(1)->setCurrentIndex(1);
