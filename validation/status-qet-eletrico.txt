@@ -1,5 +1,5 @@
 status=failure
-run_id=39641015173
-tested_commit=c330fc9109d87a9ad2325ec3bd538c448e747166
+run_id=39641725325
+tested_commit=43f25df2514b1d92c5260611b74d30990960ac7c
 workflow=testar-qet-eletrico.yml
 note=Only success means calculations, Qt compilation, available ctest and packaging passed; GUI interaction still needs verification.
