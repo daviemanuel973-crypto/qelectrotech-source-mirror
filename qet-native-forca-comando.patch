@@ -288,7 +288,7 @@ new file mode 100644
 diff --git a/sources/qetgraphicsitem/conductor.cpp b/sources/qetgraphicsitem/conductor.cpp
 --- a/sources/qetgraphicsitem/conductor.cpp
 +++ b/sources/qetgraphicsitem/conductor.cpp
-@@ -782,5 +782,14 @@
+@@ -782,5 +782,13 @@
  void Conductor::hoverEnterEvent(QGraphicsSceneHoverEvent *event) {
  	Q_UNUSED(event);
 +	// Native inspection without changing wire text, drawing or geometry.
@@ -302,7 +302,7 @@ diff --git a/sources/qetgraphicsitem/conductor.cpp b/sources/qetgraphicsitem/con
  	m_mouse_over = true;
  	update();
  }
-@@ -1817,6 +1826,24 @@
+@@ -1817,6 +1825,24 @@
  void Conductor::setProperties(const ConductorProperties &property)
  {
  	if (m_properties == property) return;
