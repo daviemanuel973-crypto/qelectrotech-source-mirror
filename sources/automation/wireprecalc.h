@@ -26,7 +26,7 @@ inline Output calculate(const Input &p) {
     Output o;
     const double factor = p.supply == Supply::ThreePhase ? std::sqrt(3.0) : 1.0;
     if (!(std::isfinite(p.powerFactor) && p.powerFactor > 0. && p.powerFactor <= 1.
-          && std::isfinite(p.lengthMeters) && p.lengthMeters >= 0.
+          && std::isfinite(p.lengthMeters) && p.lengthMeters > 0.
           && std::isfinite(p.maxDropPercent) && p.maxDropPercent > 0. && p.maxDropPercent <= 15.))
         return o;
     switch (p.known) {
