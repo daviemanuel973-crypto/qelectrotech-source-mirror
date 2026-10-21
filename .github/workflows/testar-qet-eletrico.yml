@@ -30,6 +30,7 @@ jobs:
           cache: true
           install: >-
             git
+            python
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-cmake
             mingw-w64-ucrt-x86_64-ninja
@@ -93,6 +94,23 @@ jobs:
           test -s "$EXE"
           echo "Executavel compilado: $EXE"
 
+      - name: Testar propriedades reais do QET em projeto (salvar/reabrir, desfazer e geometria)
+        shell: msys2 {0}
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          EXE=$(find "$GITHUB_WORKSPACE/build" -maxdepth 3 -iname 'qelectrotech.exe' | head -1)
+          test -s "$EXE"
+          python3 tests/qttest/run_lazy_folios_probe.py \
+            --build "$GITHUB_WORKSPACE/build" \
+            --binary "$EXE" \
+            --source "$GITHUB_WORKSPACE/tests/qttest/wire_properties_probe.cpp" \
+            --fixture "$GITHUB_WORKSPACE/examples/industrial.qet"
+          test -s "$GITHUB_WORKSPACE/build/lazy-folios/results.txt"
+          grep -q 'PASS QET native integration' "$GITHUB_WORKSPACE/build/lazy-folios/results.txt"
+
       - name: Rodar testes automatizados disponiveis
         shell: msys2 {0}
         env:
@@ -151,6 +169,7 @@ jobs:
 
       - name: Registrar resultado da compilacao na branch
         if: always()
+        continue-on-error: true
         shell: pwsh
         env:
           CI_JOB_STATUS: ${{ job.status }}
@@ -180,4 +199,5 @@ jobs:
           path: |
             build/CMakeFiles/*.log
             build/Testing/Temporary/*.log
+            build/lazy-folios/results.txt
           if-no-files-found: ignore
