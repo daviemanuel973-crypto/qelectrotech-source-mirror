@@ -10,6 +10,13 @@
 #include <QSettings>
 #include <QTemporaryDir>
 #include <QVariant>
+#include <QTimer>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QComboBox>
+#include <QDoubleSpinBox>
+#include <QPushButton>
+#include <QLabel>
 #include <stdexcept>
 #include <cstdio>
 #include "../../sources/QPropertyUndoCommand/qpropertyundocommand.h"
@@ -115,6 +122,64 @@ int main(int argc, char **argv) {
                 found=true;
         }
         require(found,"technical fields persist after save and reopen");
+        // Exercise the actual Qt dialog with an event-loop-driven test user.
+        // No external GUI automation or manual installation is needed.
+        bool sawDialog=false, sawResult=false, dialogTimedOut=false;
+        QTimer poll;
+        poll.setInterval(20);
+        QObject::connect(&poll, &QTimer::timeout, &app, [&]() {
+            for (QWidget *window : QApplication::topLevelWidgets()) {
+                if (!window->isVisible()) continue;
+                if (auto *d=qobject_cast<QDialog*>(window)) {
+                    if (d->windowTitle().contains(QStringLiteral("Dimensionamento preliminar"))) {
+                        if (sawDialog) continue;
+                        sawDialog=true;
+                        const auto combos=d->findChildren<QComboBox*>();
+                        const auto fields=d->findChildren<QDoubleSpinBox*>();
+                        require(combos.size()==2,"supply/input combination controls shown");
+                        require(fields.size()==6,"all six electrical quantities shown");
+                        combos.at(0)->setCurrentIndex(0);
+                        combos.at(1)->setCurrentIndex(1);
+                        fields.at(0)->setValue(220.);
+                        fields.at(2)->setValue(2.2);
+                        fields.at(3)->setValue(1.);
+                        const auto buttons=d->findChild<QDialogButtonBox*>();
+                        require(buttons!=nullptr &&
+                                buttons->button(QDialogButtonBox::Ok)->isEnabled(),
+                                "valid voltage+power enables applying");
+                        const auto labels=d->findChildren<QLabel*>();
+                        bool previewFound=false;
+                        for (auto *label : labels)
+                            if (label->text().contains(QStringLiteral("Resultado:")))
+                                previewFound=true;
+                        require(previewFound,"live calculation displayed");
+                        buttons->button(QDialogButtonBox::Ok)->click();
+                    }
+                }
+                if (auto *message=qobject_cast<QMessageBox*>(window)) {
+                    if (message->windowTitle().contains(QStringLiteral("Pré-dimensionamento aplicado"))) {
+                        sawResult=true;
+                        message->accept();
+                    }
+                }
+            }
+        });
+        QTimer watchdog;
+        watchdog.setSingleShot(true);
+        QObject::connect(&watchdog, &QTimer::timeout, &app, [&]() {
+            dialogTimedOut=true;
+            for (QWidget *window : QApplication::topLevelWidgets())
+                if (auto *d=qobject_cast<QDialog*>(window))
+                    if (d->isVisible()) d->reject();
+        });
+        poll.start();
+        watchdog.start(10000);
+        AutoWireProperties::run(nullptr, &reopened);
+        poll.stop();
+        watchdog.stop();
+        require(!dialogTimedOut && sawDialog && sawResult,"Qt dialog and completion message succeeded");
+        std::printf("PASS QET Qt dialog: voltage+power pair, preview, apply, confirmation\n");
+
         std::printf("PASS QET native integration: %d wires, %d auto-changed, %d unknown, persisted, undo-redo, preserved geometry\n",
                     int(wires.size()),result.modified,result.unknown);
     } catch (const std::exception &ex) {
