@@ -19,6 +19,8 @@
 #include <QLabel>
 #include <stdexcept>
 #include <cstdio>
+#include <cmath>
+#include <utility>
 #include "../../sources/QPropertyUndoCommand/qpropertyundocommand.h"
 #include "../../sources/automation/autowireproperties.h"
 #include "../../sources/automation/wireprecalc.h"
@@ -95,9 +97,18 @@ int main(int argc, char **argv) {
         // legacy project contains unrelated feeders and motor branches.
         Conductor *selectedPower=nullptr;
         for (Conductor *candidate : wires) {
-            if (AutoWireProperties::classify(candidate)==AutoWireProperties::Role::Power) {
-                selectedPower=candidate; break;
+            if (AutoWireProperties::classify(candidate)!=AutoWireProperties::Role::Power)
+                continue;
+            auto potential=candidate->relatedPotentialConductors(true);
+            potential.insert(candidate);
+            bool conflicting=false;
+            for (Conductor *member : std::as_const(potential)) {
+                const auto classification=AutoWireProperties::classify(member);
+                if (classification!=AutoWireProperties::Role::Unknown &&
+                    classification!=AutoWireProperties::Role::Power)
+                    conflicting=true;
             }
+            if (!conflicting) { selectedPower=candidate; break; }
         }
         require(selectedPower!=nullptr,"fixture contains a recognized power conductor");
         selectedPower->setSelected(true);
@@ -136,6 +147,14 @@ int main(int argc, char **argv) {
             if (explicitPeObserved) break;
         }
         require(explicitPeObserved,"explicit PE annotation classifies a compatible wire");
+
+        // A PE must never inherit an unverified global motor section.
+        Conductor *anyWire=wires.first();
+        const auto beforePE=anyWire->properties();
+        const auto proposedPE=AutoWireProperties::proposal(
+            anyWire,AutoWireProperties::Role::Earth,calc,true,true);
+        require(proposedPE.m_wire_section==beforePE.m_wire_section,
+                "PE section not guessed from motor's preliminary section");
 
         // Independent controlled metadata test, even if the fixture has no
         // recognizable power/control elements for the classifier.
@@ -196,8 +215,18 @@ int main(int argc, char **argv) {
                         require(combos.at(2)->currentIndex()==1,
                                 "with no selection the default is classification only");
                         require(fields.size()==6,"all six electrical quantities shown");
+                        // Check the former 10 W minimum bug: 24 V x
+                        // 0.05 A x 0.85 = 1.02 W, not 10 W.
                         combos.at(0)->setCurrentIndex(0);
+                        combos.at(1)->setCurrentIndex(0);
+                        fields.at(0)->setValue(24.);
+                        fields.at(1)->setValue(0.05);
+                        fields.at(3)->setValue(0.85);
+                        require(std::abs(fields.at(2)->value()-0.00102)<0.00000001,
+                                "sub-10W power is not clipped by Qt input");
                         combos.at(1)->setCurrentIndex(1);
+                        require(std::abs(fields.at(1)->value()-0.05)<0.00001,
+                                "switching known inputs keeps low-current physics");
                         fields.at(0)->setValue(220.);
                         fields.at(2)->setValue(2.2);
                         fields.at(3)->setValue(1.);
