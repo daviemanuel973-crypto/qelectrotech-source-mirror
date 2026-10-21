@@ -30,7 +30,7 @@ diff --git a/sources/automation/autowireproperties.h b/sources/automation/autowi
 new file mode 100644
 --- /dev/null
 +++ b/sources/automation/autowireproperties.h
-@@ -0,0 +1,393 @@
+@@ -0,0 +1,440 @@
 +/*
 + * QElectroTech - automatic educational power/control wire properties.
 + * Copyright 2026. Distributed under GPL-2.0-or-later, compatible with QET.
@@ -61,6 +61,8 @@ new file mode 100644
 +#include <QRegularExpression>
 +#include <QVariant>
 +#include <QStringList>
++#include <QHash>
++#include <QSet>
 +#include <QUndoCommand>
 +
 +namespace AutoWireProperties {
@@ -77,6 +79,8 @@ new file mode 100644
 +    int kept = 0;
 +    int verified = 0;
 +    int failed = 0;
++    int inferredByPotential = 0;
++    int conflictingPotentials = 0;
 +    double proposedPowerSection = 0.;
 +    QStringList details;
 +};
@@ -222,28 +226,68 @@ new file mode 100644
 +    result.proposedPowerSection = sizing.sectionMm2;
 +    auto *batch = new QUndoCommand(QObject::tr("Preencher propriedades de condutores (perfil didático)"));
 +    QList<QPair<Conductor *, ConductorProperties>> expected;
-+    for (Diagram *diagram : project->diagrams()) {
-+        if (!diagram) continue;
-+        const QList<Conductor *> wires = DiagramContent(diagram, false).conductors();
-+        for (Conductor *c : wires) {
-+            if (!c) continue;
-+            const Role role = classify(c);
-+            switch (role) {
-+                case Role::Power:   ++result.power; break;
-+                case Role::Control: ++result.control; break;
-+                case Role::Neutral: ++result.neutral; break;
-+                case Role::Earth:   ++result.earth; break;
-+                case Role::Unknown: ++result.unknown; continue;
-+            }
-+            const ConductorProperties before = c->properties();
-+            const ConductorProperties after = proposal(c, role, sizing, overwrite);
-+            if (before == after) { ++result.kept; continue; }
-+            new QPropertyUndoCommand(c, "properties",
-+                                     QVariant::fromValue(before),
-+                                     QVariant::fromValue(after), batch);
-+            expected.append(qMakePair(c, after));
-+            ++result.modified;
++    QList<Conductor *> wires;
++    for (Diagram *diagram : project->diagrams())
++        if (diagram) wires.append(DiagramContent(diagram, false).conductors());
++
++    // Stage 1: direct evidence at components/terminals. A label or a
++    // drawing colour by itself does not establish a complete circuit.
++    QHash<Conductor *, Role> direct, resolved;
++    QSet<Conductor *> available;
++    for (Conductor *c : wires) {
++        if (!c) continue;
++        available.insert(c);
++        direct.insert(c, classify(c));
++    }
++
++    // Stage 2: the QET engine already knows the *electrically continuous*
++    // groups. Propagate only if all classified members of the potential
++    // agree. relatedPotentialConductors respects function-isolating
++    // terminals and never crosses an ordinary device/contact/coil.
++    QSet<Conductor *> visited;
++    for (Conductor *c : wires) {
++        if (!c || visited.contains(c)) continue;
++        QSet<Conductor *> potential = c->relatedPotentialConductors(true);
++        potential.insert(c);
++        potential.intersect(available);
++        Role agreed = Role::Unknown;
++        bool conflict = false;
++        for (Conductor *member : std::as_const(potential)) {
++            const Role seed = direct.value(member, Role::Unknown);
++            if (seed == Role::Unknown) continue;
++            if (agreed == Role::Unknown) agreed = seed;
++            else if (agreed != seed) conflict = true;
 +        }
++        if (conflict) ++result.conflictingPotentials;
++        for (Conductor *member : std::as_const(potential)) {
++            visited.insert(member);
++            const Role seed = direct.value(member, Role::Unknown);
++            const Role finalRole = seed != Role::Unknown ? seed :
++                conflict ? Role::Unknown : agreed;
++            if (seed == Role::Unknown && finalRole != Role::Unknown)
++                ++result.inferredByPotential;
++            resolved.insert(member, finalRole);
++        }
++    }
++
++    for (Conductor *c : wires) {
++        if (!c) continue;
++        const Role role = resolved.value(c, Role::Unknown);
++        switch (role) {
++            case Role::Power:   ++result.power; break;
++            case Role::Control: ++result.control; break;
++            case Role::Neutral: ++result.neutral; break;
++            case Role::Earth:   ++result.earth; break;
++            case Role::Unknown: ++result.unknown; continue;
++        }
++        const ConductorProperties before = c->properties();
++        const ConductorProperties after = proposal(c, role, sizing, overwrite);
++        if (before == after) { ++result.kept; continue; }
++        new QPropertyUndoCommand(c, "properties",
++                                 QVariant::fromValue(before),
++                                 QVariant::fromValue(after), batch);
++        expected.append(qMakePair(c, after));
++        ++result.modified;
 +    }
 +    if (result.modified) project->undoStack()->push(batch);
 +    else delete batch;
@@ -384,11 +428,14 @@ new file mode 100644
 +        QObject::tr("Seção de força sugerida: %1\n"
 +                    "Força: %2 | Comando: %3 | Neutro: %4 | PE: %5\n"
 +                    "Não classificados: %6 | Atualizados: %7 | Sem alteração: %8\n"
-+                    "Gravações verificadas: %9 | Falhas de gravação: %10\n\n"
++                    "Gravações verificadas: %9 | Falhas de gravação: %10\n"
++                    "Classificados pela continuidade elétrica: %11\n"
++                    "Grupos com evidências conflitantes: %12\n\n"
 +                    "Abra Editar → Ver características técnicas dos fios para conferir.")
 +            .arg(sectionText(r.proposedPowerSection))
 +            .arg(r.power).arg(r.control).arg(r.neutral).arg(r.earth)
-+            .arg(r.unknown).arg(r.modified).arg(r.kept).arg(r.verified).arg(r.failed),
++            .arg(r.unknown).arg(r.modified).arg(r.kept).arg(r.verified).arg(r.failed)
++            .arg(r.inferredByPotential).arg(r.conflictingPotentials),
 +        QMessageBox::Ok, parent);
 +    if (r.failed) message.setIcon(QMessageBox::Warning);
 +    if (!r.details.isEmpty()) message.setDetailedText(r.details.join(QStringLiteral("\n")));
