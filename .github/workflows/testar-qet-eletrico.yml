@@ -52,12 +52,18 @@ jobs:
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE"
-          git apply --check qet-native-forca-comando.patch
-          git apply qet-native-forca-comando.patch
+          # Checkout Windows may convert LF -> CRLF for text patches.
+          # Remove only the carriage return at line endings, then check
+          # patch context without misclassifying CR as trailing whitespace.
+          sed -i 's/\r$//' qet-native-forca-comando.patch
+          git apply --whitespace=nowarn --check qet-native-forca-comando.patch
+          git apply --whitespace=nowarn qet-native-forca-comando.patch
           grep -q 'AutoWireProperties::run' sources/qetdiagrameditor.cpp
           grep -q 'AutoWireProperties::showReport' sources/qetdiagrameditor.cpp
           grep -q 'QetWirePrecalc::calculate' sources/automation/autowireproperties.h
-          grep -q 'QetWirePrecalc::peSection' sources/automation/autowireproperties.h
+          grep -q 'selectedCircuit' sources/automation/autowireproperties.h
+          grep -q 'classificationOnly' sources/automation/autowireproperties.h
+          grep -q 'section = 0.;' sources/automation/autowireproperties.h
           grep -q 'Gravações verificadas' sources/automation/autowireproperties.h
           echo 'Patch REV2 com relatorio e verificacao integrado ao menu Editar.'
 
