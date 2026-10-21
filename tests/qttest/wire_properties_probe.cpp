@@ -26,6 +26,7 @@
 #include "../../sources/diagramcontent.h"
 #include "../../sources/qetmessagebox.h"
 #include "../../sources/qetproject.h"
+#include "../../sources/qetresult.h"
 #include "../../sources/qetgraphicsitem/conductor.h"
 
 static void require(bool test, const char *name) {
