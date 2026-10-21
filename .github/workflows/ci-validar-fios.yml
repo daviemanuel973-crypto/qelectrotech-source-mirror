@@ -54,8 +54,9 @@ jobs:
           # Remove only the carriage return at line endings, then check
           # patch context without misclassifying CR as trailing whitespace.
           sed -i 's/\r$//' qet-native-forca-comando.patch
-          git apply --whitespace=nowarn --check qet-native-forca-comando.patch
-          git apply --whitespace=nowarn qet-native-forca-comando.patch
+          sed -i 's/\r$//' sources/qetdiagrameditor.cpp sources/qetgraphicsitem/conductor.cpp
+          git apply --ignore-space-at-eol --whitespace=nowarn --check qet-native-forca-comando.patch
+          git apply --ignore-space-at-eol --whitespace=nowarn qet-native-forca-comando.patch
           grep -q 'AutoWireProperties::run' sources/qetdiagrameditor.cpp
           grep -q 'AutoWireProperties::showReport' sources/qetdiagrameditor.cpp
           grep -q 'QetWirePrecalc::calculate' sources/automation/autowireproperties.h
