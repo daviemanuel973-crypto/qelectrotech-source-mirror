@@ -30,7 +30,7 @@ diff --git a/sources/automation/autowireproperties.h b/sources/automation/autowi
 new file mode 100644
 --- /dev/null
 +++ b/sources/automation/autowireproperties.h
-@@ -0,0 +1,265 @@
+@@ -0,0 +1,392 @@
 +/*
 + * QElectroTech - automatic educational power/control wire properties.
 + * Copyright 2026. Distributed under GPL-2.0-or-later, compatible with QET.
@@ -46,7 +46,17 @@ new file mode 100644
 +#include "../qetgraphicsitem/conductor.h"
 +#include "../qetgraphicsitem/element.h"
 +#include "../qetgraphicsitem/terminal.h"
++#include "wireprecalc.h"
 +#include <QMessageBox>
++#include <QDialog>
++#include <QDialogButtonBox>
++#include <QFormLayout>
++#include <QVBoxLayout>
++#include <QComboBox>
++#include <QDoubleSpinBox>
++#include <QCheckBox>
++#include <QLabel>
++#include <QSignalBlocker>
 +#include <QRegularExpression>
 +#include <QVariant>
 +#include <QStringList>
@@ -66,6 +76,7 @@ new file mode 100644
 +    int kept = 0;
 +    int verified = 0;
 +    int failed = 0;
++    double proposedPowerSection = 0.;
 +    QStringList details;
 +};
 +
@@ -159,21 +170,38 @@ new file mode 100644
 +    return found;
 +}
 +
-+inline ConductorProperties proposal(const Conductor *c, Role role) {
++inline QString sectionText(double section) {
++    return QString::number(section, 'f', 1).replace('.', ',') + QStringLiteral(" mm²");
++}
++
++inline ConductorProperties proposal(const Conductor *c, Role role,
++                                    const QetWirePrecalc::Output &sizing,
++                                    bool overwrite) {
 +    ConductorProperties props = c->properties();
 +    // Only fill technical fields that are blank. Do not touch label, formula,
 +    // text visibility, wire drawing colour, routing or geometry.
-+    if (props.m_wire_section.trimmed().isEmpty()) {
-+        if (role == Role::Power) props.m_wire_section = QStringLiteral("2,5 mm²");
-+        else if (role == Role::Control) props.m_wire_section = QStringLiteral("1,5 mm²");
-+        // PE and N require upstream conductor context / verified dimensioning.
-+    }
-+    if (props.m_wire_color.trimmed().isEmpty()) {
-+        if (role == Role::Power) props.m_wire_color = QStringLiteral("Preto");
-+        else if (role == Role::Control) props.m_wire_color = QStringLiteral("Vermelho");
-+        else if (role == Role::Neutral) props.m_wire_color = QStringLiteral("Azul-claro");
-+        else if (role == Role::Earth) props.m_wire_color = QStringLiteral("Verde/amarelo");
-+    }
++    double section = 0.;
++    if (role == Role::Power || role == Role::Neutral)
++        section = sizing.sectionMm2;
++    else if (role == Role::Control)
++        section = 1.5; // educational control circuit baseline
++    else if (role == Role::Earth)
++        section = QetWirePrecalc::peSection(sizing.sectionMm2);
++    if (section > 0. && (overwrite || props.m_wire_section.trimmed().isEmpty()))
++        props.m_wire_section = sectionText(section);
++
++    QString color;
++    if (role == Role::Power) color = QStringLiteral("Preto");
++    else if (role == Role::Control) color = QStringLiteral("Vermelho");
++    else if (role == Role::Neutral) color = QStringLiteral("Azul-claro");
++    else if (role == Role::Earth) color = QStringLiteral("Verde/amarelo");
++    if (!color.isEmpty() && (overwrite || props.m_wire_color.trimmed().isEmpty()))
++        props.m_wire_color = color;
++
++    // The motor supply voltage is not necessarily the control voltage.
++    if ((role == Role::Power || role == Role::Neutral) &&
++        (overwrite || props.m_tension_protocol.trimmed().isEmpty()))
++        props.m_tension_protocol = QString::number(sizing.voltage, 'f', 1) + QStringLiteral(" V");
 +    if (props.m_function.trimmed().isEmpty()) {
 +        const QString mark = explicitFunction(c);
 +        if (!mark.isEmpty()) props.m_function = mark;
@@ -185,9 +213,12 @@ new file mode 100644
 +    return props;
 +}
 +
-+inline Result apply(QETProject *project) {
++inline Result apply(QETProject *project, const QetWirePrecalc::Output &sizing,
++                    bool overwrite = false) {
 +    Result result;
-+    if (!project || project->isReadOnly() || !project->undoStack()) return result;
++    if (!sizing.valid || !sizing.withinTable ||
++        !project || project->isReadOnly() || !project->undoStack()) return result;
++    result.proposedPowerSection = sizing.sectionMm2;
 +    auto *batch = new QUndoCommand(QObject::tr("Preencher propriedades de condutores (perfil didático)"));
 +    QList<QPair<Conductor *, ConductorProperties>> expected;
 +    for (Diagram *diagram : project->diagrams()) {
@@ -204,7 +235,7 @@ new file mode 100644
 +                case Role::Unknown: ++result.unknown; continue;
 +            }
 +            const ConductorProperties before = c->properties();
-+            const ConductorProperties after = proposal(c, role);
++            const ConductorProperties after = proposal(c, role, sizing, overwrite);
 +            if (before == after) { ++result.kept; continue; }
 +            new QPropertyUndoCommand(c, "properties",
 +                                     QVariant::fromValue(before),
@@ -235,6 +266,7 @@ new file mode 100644
 +    return result;
 +}
 +
++
 +inline void run(QWidget *parent, QETProject *project) {
 +    if (!project) return;
 +    if (project->isReadOnly()) {
@@ -242,25 +274,120 @@ new file mode 100644
 +            QObject::tr("Abra uma cópia editável do projeto antes de aplicar as propriedades."));
 +        return;
 +    }
-+    if (QMessageBox::question(parent, QObject::tr("Propriedades automáticas dos fios"),
-+            QObject::tr("Aplicar perfis didáticos aos fios reconhecidos?\n\n"
-+                        "Força: 2,5 mm² / preto\nComando: 1,5 mm² / vermelho\n"
-+                        "N/PE: cor apenas quando identificados explicitamente\n\n"
-+                        "Não é um dimensionamento pela corrente e NÃO valida a instalação.\n"
-+                        "Os valores existentes serão preservados. Nenhum texto ou desenho será movido.\n"
-+                        "Toda a operação poderá ser desfeita com Ctrl+Z."),
-+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
-+        return;
-+    const Result r = apply(project);
-+    QMessageBox message(QMessageBox::Information, QObject::tr("Identificação concluída"),
-+        QObject::tr("Força: %1\nComando: %2\nNeutro: %3\nProteção (PE): %4\n"
-+                    "Não classificados: %5\nAtualizados: %6\nSem alteração: %7\n\n"
-+                    "Perfis didáticos: conferir dimensionamento e funções antes de executar a instalação.")
++
++    QDialog dialog(parent);
++    dialog.setWindowTitle(QObject::tr("Dimensionamento preliminar de condutores"));
++    auto *layout = new QVBoxLayout(&dialog);
++    auto *form = new QFormLayout;
++    layout->addLayout(form);
++    auto *supply = new QComboBox;
++    supply->addItems({QObject::tr("Dois fios (tensão entre condutores)"),
++                      QObject::tr("Trifásico equilibrado (tensão entre fases)")});
++    supply->setCurrentIndex(1);
++    auto *pair = new QComboBox;
++    pair->addItems({QObject::tr("Conheço tensão e corrente"),
++                    QObject::tr("Conheço tensão e potência"),
++                    QObject::tr("Conheço corrente e potência")});
++    auto numeric = [&dialog](double initial, double low, double high, int decimals) {
++        auto *w = new QDoubleSpinBox(&dialog);
++        w->setDecimals(decimals);
++        w->setRange(low, high);
++        w->setValue(initial);
++        return w;
++    };
++    auto *voltage = numeric(220., 0.01, 100000., 2);
++    auto *current = numeric(10., 0.01, 100000., 3);
++    auto *power = numeric(3., 0.01, 100000., 3); // kW
++    auto *pf = numeric(0.85, 0.01, 1.0, 2);
++    auto *length = numeric(20., 0., 50000., 1);
++    auto *drop = numeric(4., 0.1, 15., 1);
++    voltage->setSuffix(QObject::tr(" V"));
++    current->setSuffix(QObject::tr(" A"));
++    power->setSuffix(QObject::tr(" kW (potência elétrica ativa)"));
++    length->setSuffix(QObject::tr(" m"));
++    drop->setSuffix(QStringLiteral(" %"));
++    form->addRow(QObject::tr("Alimentação:"), supply);
++    form->addRow(QObject::tr("Informações conhecidas:"), pair);
++    form->addRow(QObject::tr("Tensão entre condutores / fases:"), voltage);
++    form->addRow(QObject::tr("Corrente da carga:"), current);
++    form->addRow(QObject::tr("Potência elétrica ativa:"), power);
++    form->addRow(QObject::tr("Fator de potência (cos φ):"), pf);
++    form->addRow(QObject::tr("Comprimento de ida do circuito:"), length);
++    form->addRow(QObject::tr("Queda máxima admitida:"), drop);
++    auto *overwrite = new QCheckBox(QObject::tr(
++        "Sobrescrever seções, cores e tensão já preenchidas (inclusive manualmente)"));
++    layout->addWidget(overwrite);
++    auto *preview = new QLabel;
++    preview->setWordWrap(true);
++    layout->addWidget(preview);
++    auto *note = new QLabel(QObject::tr(
++        "PRÉ-DIMENSIONAMENTO DIDÁTICO: cobre/PVC 70 °C, método B1, 30 °C, "
++        "sem agrupamento. Não verifica proteção, partida de motor ou todas as "
++        "exigências da NBR 5410. Para potência mecânica de placa de motor, "
++        "também é necessário considerar o rendimento (η)."));
++    note->setWordWrap(true);
++    layout->addWidget(note);
++    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
++    layout->addWidget(buttons);
++    QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
++    QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
++
++    QetWirePrecalc::Output latest;
++    auto refresh = [&]() {
++        const int known = pair->currentIndex();
++        voltage->setEnabled(known != 2);
++        current->setEnabled(known != 1);
++        power->setEnabled(known != 0);
++        QetWirePrecalc::Input input;
++        input.supply = supply->currentIndex() == 1 ?
++            QetWirePrecalc::Supply::ThreePhase : QetWirePrecalc::Supply::TwoWire;
++        input.known = known == 0 ? QetWirePrecalc::KnownPair::VoltageCurrent :
++                      known == 1 ? QetWirePrecalc::KnownPair::VoltagePower :
++                                   QetWirePrecalc::KnownPair::CurrentPower;
++        input.voltage = voltage->value();
++        input.current = current->value();
++        input.power = power->value() * 1000.;
++        input.powerFactor = pf->value();
++        input.lengthMeters = length->value();
++        input.maxDropPercent = drop->value();
++        latest = QetWirePrecalc::calculate(input);
++        if (latest.valid) {
++            if (known == 0) { QSignalBlocker b(power); power->setValue(latest.power / 1000.); }
++            if (known == 1) { QSignalBlocker b(current); current->setValue(latest.current); }
++            if (known == 2) { QSignalBlocker b(voltage); voltage->setValue(latest.voltage); }
++        }
++        const bool ok = latest.valid && latest.withinTable;
++        buttons->button(QDialogButtonBox::Ok)->setEnabled(ok);
++        if (!latest.valid) preview->setText(QObject::tr("Valores inválidos."));
++        else if (!latest.withinTable)
++            preview->setText(QObject::tr("Corrente ou queda de tensão fora da tabela preliminar até 120 mm²."));
++        else preview->setText(QObject::tr(
++            "Resultado: %1 V / %2 A / %3 kW; força sugerida: %4; "
++            "queda aproximada: %5%; comando didático: 1,5 mm².")
++                .arg(latest.voltage, 0, 'f', 1).arg(latest.current, 0, 'f', 2)
++                .arg(latest.power / 1000., 0, 'f', 3)
++                .arg(sectionText(latest.sectionMm2))
++                .arg(latest.dropPercent, 0, 'f', 2));
++    };
++    QObject::connect(supply, QOverload<int>::of(&QComboBox::currentIndexChanged), &dialog, refresh);
++    QObject::connect(pair, QOverload<int>::of(&QComboBox::currentIndexChanged), &dialog, refresh);
++    for (QDoubleSpinBox *w : {voltage, current, power, pf, length, drop})
++        QObject::connect(w, QOverload<double>::of(&QDoubleSpinBox::valueChanged), &dialog, refresh);
++    refresh();
++    if (dialog.exec() != QDialog::Accepted) return;
++    // The data are derived again from the final widget values.
++    refresh();
++    if (!latest.valid || !latest.withinTable) return;
++    const Result r = apply(project, latest, overwrite->isChecked());
++    QMessageBox message(QMessageBox::Information, QObject::tr("Pré-dimensionamento aplicado"),
++        QObject::tr("Seção de força sugerida: %1\n"
++                    "Força: %2 | Comando: %3 | Neutro: %4 | PE: %5\n"
++                    "Não classificados: %6 | Atualizados: %7 | Sem alteração: %8\n"
++                    "Gravações verificadas: %9 | Falhas de gravação: %10\n\n"
++                    "Abra Editar → Ver características técnicas dos fios para conferir.")
++            .arg(sectionText(r.proposedPowerSection))
 +            .arg(r.power).arg(r.control).arg(r.neutral).arg(r.earth)
-+            .arg(r.unknown).arg(r.modified).arg(r.kept)
-+            + QObject::tr("\n\nGravações verificadas: %1\nFalhas de gravação: %2\n\n"
-+                          "Passe o mouse sobre o fio para ver as informações técnicas.")
-+                  .arg(r.verified).arg(r.failed),
++            .arg(r.unknown).arg(r.modified).arg(r.kept).arg(r.verified).arg(r.failed),
 +        QMessageBox::Ok, parent);
 +    if (r.failed) message.setIcon(QMessageBox::Warning);
 +    if (!r.details.isEmpty()) message.setDetailedText(r.details.join(QStringLiteral("\n")));
