@@ -30,7 +30,7 @@ diff --git a/sources/automation/autowireproperties.h b/sources/automation/autowi
 new file mode 100644
 --- /dev/null
 +++ b/sources/automation/autowireproperties.h
-@@ -0,0 +1,540 @@
+@@ -0,0 +1,549 @@
 +/*
 + * QElectroTech - automatic educational power/control wire properties.
 + * Copyright 2026. Distributed under GPL-2.0-or-later, compatible with QET.
@@ -242,8 +242,9 @@ new file mode 100644
 +                    bool overwrite = false, bool allCircuitsSameLoad = false,
 +                    bool classificationOnly = false) {
 +    Result result;
-+    if (!sizing.valid || !sizing.withinTable ||
-+        !project || project->isReadOnly() || !project->undoStack()) return result;
++    if (!project || project->isReadOnly() || !project->undoStack() ||
++        (!classificationOnly && (!sizing.valid || !sizing.withinTable)))
++        return result;
 +    result.proposedPowerSection = sizing.sectionMm2;
 +    auto *batch = new QUndoCommand(QObject::tr("Preencher propriedades de condutores (perfil didático)"));
 +    QList<QPair<Conductor *, ConductorProperties>> expected;
@@ -476,10 +477,17 @@ new file mode 100644
 +                            latest.voltage <= voltage->maximum()));
 +        const bool wantsSizing = scope->currentIndex() != 1;
 +        const bool hasCircuit = scope->currentIndex() != 0 || selectedWires > 0;
-+        const bool ok = latest.valid && latest.withinTable && outputFits &&
-+                        (!wantsSizing || hasCircuit);
++        // Classifying a diagram is independent of the motor current.
++        // Invalid sizing must never disable classification-only mode.
++        const bool ok = scope->currentIndex() == 1 ||
++                        (latest.valid && latest.withinTable && outputFits &&
++                         (!wantsSizing || hasCircuit));
 +        buttons->button(QDialogButtonBox::Ok)->setEnabled(ok);
-+        if (!latest.valid) preview->setText(QObject::tr("Valores inválidos."));
++        if (scope->currentIndex() == 1)
++            preview->setText(QObject::tr(
++                "Somente identificar categorias, funções e cores técnicas. "
++                "Não utiliza V/I/P nem dimensiona seções ou tensões."));
++        else if (!latest.valid) preview->setText(QObject::tr("Valores inválidos."));
 +        else if (!latest.withinTable)
 +            preview->setText(QObject::tr("Corrente ou queda de tensão fora da tabela preliminar até 120 mm²."));
 +        else if (!outputFits)
@@ -506,7 +514,8 @@ new file mode 100644
 +    if (dialog.exec() != QDialog::Accepted) return;
 +    // The data are derived again from the final widget values.
 +    refresh();
-+    if (!latest.valid || !latest.withinTable) return;
++    const bool classificationOnly = scope->currentIndex() == 1;
++    if (!classificationOnly && (!latest.valid || !latest.withinTable)) return;
 +    if (scope->currentIndex() == 2 &&
 +        QMessageBox::warning(parent,
 +            QObject::tr("Dimensionamento global não verificado"),
@@ -518,7 +527,6 @@ new file mode 100644
 +        return;
 +    // Index 1 is classification-only; never use circuit sizing there.
 +    const bool allCircuits = scope->currentIndex() == 2;
-+    const bool classificationOnly = scope->currentIndex() == 1;
 +    const Result r = apply(project, latest, overwrite->isChecked(),
 +                           allCircuits, classificationOnly);
 +    QMessageBox message(QMessageBox::Information, QObject::tr("Pré-dimensionamento aplicado"),
@@ -531,7 +539,8 @@ new file mode 100644
 +                    "Bitolas atribuídas no escopo: %13\n"
 +                    "Fios classificados fora do escopo de bitola: %14\n\n"
 +                    "Abra Editar → Ver características técnicas dos fios para conferir.")
-+            .arg(sectionText(r.proposedPowerSection))
++            .arg(classificationOnly ? QObject::tr("não aplicada") :
++                                       sectionText(r.proposedPowerSection))
 +            .arg(r.power).arg(r.control).arg(r.neutral).arg(r.earth)
 +            .arg(r.unknown).arg(r.modified).arg(r.kept).arg(r.verified).arg(r.failed)
 +            .arg(r.inferredByPotential).arg(r.conflictingPotentials)
