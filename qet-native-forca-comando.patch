@@ -30,7 +30,7 @@ diff --git a/sources/automation/autowireproperties.h b/sources/automation/autowi
 new file mode 100644
 --- /dev/null
 +++ b/sources/automation/autowireproperties.h
-@@ -0,0 +1,440 @@
+@@ -0,0 +1,441 @@
 +/*
 + * QElectroTech - automatic educational power/control wire properties.
 + * Copyright 2026. Distributed under GPL-2.0-or-later, compatible with QET.
@@ -63,6 +63,7 @@ new file mode 100644
 +#include <QStringList>
 +#include <QHash>
 +#include <QSet>
++#include <utility>
 +#include <QUndoCommand>
 +
 +namespace AutoWireProperties {
