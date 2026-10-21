@@ -9,7 +9,7 @@ diff --git a/sources/qetdiagrameditor.cpp b/sources/qetdiagrameditor.cpp
  #include "qetgraphicsitem/ViewItem/qetgraphicstableitem.h"
  #include "qetgraphicsitem/conductortextitem.h"
  #include "qetgraphicsitem/dynamicelementtextitem.h"
-@@ -1500,7 +1501,12 @@
+@@ -1500,7 +1501,16 @@
  	m_align_menu -> addSeparator();
  	m_align_menu -> addActions(m_align_actions_group.actions().mid(4));
  	menu_edition -> addSeparator();
@@ -19,6 +19,10 @@ diff --git a/sources/qetdiagrameditor.cpp b/sources/qetdiagrameditor.cpp
 +	connect(auto_wire_props, &QAction::triggered, this, [this]() {
 +		AutoWireProperties::run(this, currentProject());
 +	});
++	QAction *wire_report = menu_edition->addAction(tr("Ver características técnicas dos fios..."));
++	connect(wire_report, &QAction::triggered, this, [this]() {
++		AutoWireProperties::showReport(this, currentProject());
++	});
  	menu_edition -> addSeparator();
  	menu_edition -> addAction(m_edit_diagram_properties);
  		//Shared with the folio's context menu (see
@@ -26,7 +30,7 @@ diff --git a/sources/automation/autowireproperties.h b/sources/automation/autowi
 new file mode 100644
 --- /dev/null
 +++ b/sources/automation/autowireproperties.h
-@@ -0,0 +1,197 @@
+@@ -0,0 +1,254 @@
 +/*
 + * QElectroTech - automatic educational power/control wire properties.
 + * Copyright 2026. Distributed under GPL-2.0-or-later, compatible with QET.
@@ -45,6 +49,7 @@ new file mode 100644
 +#include <QMessageBox>
 +#include <QRegularExpression>
 +#include <QVariant>
++#include <QStringList>
 +#include <QUndoCommand>
 +
 +namespace AutoWireProperties {
@@ -59,6 +64,9 @@ new file mode 100644
 +    int unknown = 0;
 +    int modified = 0;
 +    int kept = 0;
++    int verified = 0;
++    int failed = 0;
++    QStringList details;
 +};
 +
 +// Terminals marked A1/A2 are characteristic of contactor/relay coils.
@@ -170,6 +178,7 @@ new file mode 100644
 +    Result result;
 +    if (!project || project->isReadOnly() || !project->undoStack()) return result;
 +    auto *batch = new QUndoCommand(QObject::tr("Preencher propriedades de condutores (perfil didático)"));
++    QList<QPair<Conductor *, ConductorProperties>> expected;
 +    for (Diagram *diagram : project->diagrams()) {
 +        if (!diagram) continue;
 +        const QList<Conductor *> wires = DiagramContent(diagram, false).conductors();
@@ -189,11 +198,29 @@ new file mode 100644
 +            new QPropertyUndoCommand(c, "properties",
 +                                     QVariant::fromValue(before),
 +                                     QVariant::fromValue(after), batch);
++            expected.append(qMakePair(c, after));
 +            ++result.modified;
 +        }
 +    }
 +    if (result.modified) project->undoStack()->push(batch);
 +    else delete batch;
++
++    // Verify that QElectroTech actually stored the technical properties.
++    for (const auto &item : expected) {
++        const ConductorProperties actual = item.first->properties();
++        const ConductorProperties &wanted = item.second;
++        const bool ok = actual.m_wire_section == wanted.m_wire_section &&
++                        actual.m_wire_color == wanted.m_wire_color &&
++                        actual.m_function == wanted.m_function;
++        if (ok) ++result.verified;
++        else ++result.failed;
++        result.details << QObject::tr("Fio %1 — seção: %2; cor: %3; função: %4 — %5")
++            .arg(item.first->uuid().toString(QUuid::WithoutBraces).left(8),
++                 actual.m_wire_section.isEmpty() ? QObject::tr("(vazia)") : actual.m_wire_section,
++                 actual.m_wire_color.isEmpty() ? QObject::tr("(vazia)") : actual.m_wire_color,
++                 actual.m_function.isEmpty() ? QObject::tr("(não definida)") : actual.m_function,
++                 ok ? QObject::tr("verificado") : QObject::tr("FALHA"));
++    }
 +    return result;
 +}
 +
@@ -214,12 +241,46 @@ new file mode 100644
 +            QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
 +        return;
 +    const Result r = apply(project);
-+    QMessageBox::information(parent, QObject::tr("Identificação concluída"),
++    QMessageBox message(QMessageBox::Information, QObject::tr("Identificação concluída"),
 +        QObject::tr("Força: %1\nComando: %2\nNeutro: %3\nProteção (PE): %4\n"
 +                    "Não classificados: %5\nAtualizados: %6\nSem alteração: %7\n\n"
 +                    "Perfis didáticos: conferir dimensionamento e funções antes de executar a instalação.")
 +            .arg(r.power).arg(r.control).arg(r.neutral).arg(r.earth)
-+            .arg(r.unknown).arg(r.modified).arg(r.kept));
++            .arg(r.unknown).arg(r.modified).arg(r.kept)
++            + QObject::tr("\n\nGravações verificadas: %1\nFalhas de gravação: %2\n\n"
++                          "Passe o mouse sobre o fio para ver as informações técnicas.")
++                  .arg(r.verified).arg(r.failed),
++        QMessageBox::Ok, parent);
++    if (r.failed) message.setIcon(QMessageBox::Warning);
++    if (!r.details.isEmpty()) message.setDetailedText(r.details.join(QStringLiteral("\n")));
++    message.exec();
++}
++
++inline void showReport(QWidget *parent, QETProject *project) {
++    if (!project) return;
++    QStringList lines;
++    int count = 0;
++    int blank = 0;
++    for (Diagram *d : project->diagrams()) {
++        if (!d) continue;
++        for (Conductor *c : DiagramContent(d, false).conductors()) {
++            if (!c) continue;
++            ++count;
++            const ConductorProperties p = c->properties();
++            if (p.m_wire_section.isEmpty() && p.m_wire_color.isEmpty()) ++blank;
++            lines << QObject::tr("Fio %1 | Seção: %2 | Cor: %3 | Função: %4 | Tensão: %5")
++                .arg(c->uuid().toString(QUuid::WithoutBraces).left(8),
++                     p.m_wire_section.isEmpty() ? QObject::tr("(vazia)") : p.m_wire_section,
++                     p.m_wire_color.isEmpty() ? QObject::tr("(vazia)") : p.m_wire_color,
++                     p.m_function.isEmpty() ? QObject::tr("(vazia)") : p.m_function,
++                     p.m_tension_protocol.isEmpty() ? QObject::tr("(vazia)") : p.m_tension_protocol);
++        }
++    }
++    QMessageBox box(QMessageBox::Information, QObject::tr("Características dos fios"),
++        QObject::tr("Total: %1\nSem seção e cor: %2\n\nAbra 'Mostrar detalhes' para conferir os valores armazenados no projeto.")
++            .arg(count).arg(blank), QMessageBox::Ok, parent);
++    box.setDetailedText(lines.join(QStringLiteral("\n")));
++    box.exec();
 +}
 +
 +} // namespace AutoWireProperties
@@ -227,7 +288,21 @@ new file mode 100644
 diff --git a/sources/qetgraphicsitem/conductor.cpp b/sources/qetgraphicsitem/conductor.cpp
 --- a/sources/qetgraphicsitem/conductor.cpp
 +++ b/sources/qetgraphicsitem/conductor.cpp
-@@ -1817,6 +1817,24 @@
+@@ -782,5 +782,14 @@
+ void Conductor::hoverEnterEvent(QGraphicsSceneHoverEvent *event) {
+ 	Q_UNUSED(event);
++	// Native inspection without changing wire text, drawing or geometry.
++	const ConductorProperties p = properties();
++	QStringList lines;
++	if (!p.m_function.isEmpty()) lines << QObject::tr("Função: %1").arg(p.m_function);
++	if (!p.m_wire_section.isEmpty()) lines << QObject::tr("Seção: %1").arg(p.m_wire_section);
++	if (!p.m_wire_color.isEmpty()) lines << QObject::tr("Cor: %1").arg(p.m_wire_color);
++	if (!p.m_tension_protocol.isEmpty()) lines << QObject::tr("Tensão/protocolo: %1").arg(p.m_tension_protocol);
++	setToolTip(lines.join(QStringLiteral("\n")));
+ 	m_mouse_over = true;
+ 	update();
+ }
+@@ -1817,6 +1826,24 @@
  void Conductor::setProperties(const ConductorProperties &property)
  {
  	if (m_properties == property) return;
