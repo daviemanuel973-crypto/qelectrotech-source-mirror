@@ -30,7 +30,7 @@ diff --git a/sources/automation/autowireproperties.h b/sources/automation/autowi
 new file mode 100644
 --- /dev/null
 +++ b/sources/automation/autowireproperties.h
-@@ -0,0 +1,254 @@
+@@ -0,0 +1,265 @@
 +/*
 + * QElectroTech - automatic educational power/control wire properties.
 + * Copyright 2026. Distributed under GPL-2.0-or-later, compatible with QET.
@@ -123,6 +123,14 @@ new file mode 100644
 +            auxiliary)
 +            control = true;
 +    }
++    // Legacy diagrams sometimes represent PE as a green (#00aa00)
++    // line connected to anonymous "i"/"Jump" terminals. Colour alone
++    // is a heuristic, not electrical proof, so reject conflicts with
++    // known power/control/neutral evidence; PE size stays unassigned.
++    const bool greenPeHint =
++        c->properties().color == QColor(QStringLiteral("#00aa00"))
++        && !power && !control && !neutral;
++    if (greenPeHint) earth = true;
 +    // Conflicts and PE/N mixes must NOT be given a made-up profile.
 +    if ((power && control) || (earth && (neutral || power || control)) ||
 +        (neutral && power)) return Role::Unknown;
@@ -169,6 +177,9 @@ new file mode 100644
 +    if (props.m_function.trimmed().isEmpty()) {
 +        const QString mark = explicitFunction(c);
 +        if (!mark.isEmpty()) props.m_function = mark;
++        else if (role == Role::Earth &&
++                 props.color == QColor(QStringLiteral("#00aa00")))
++            props.m_function = QStringLiteral("PE");
 +    }
 +    // Deliberately do not assume voltage/protocol or protective conductor section.
 +    return props;
