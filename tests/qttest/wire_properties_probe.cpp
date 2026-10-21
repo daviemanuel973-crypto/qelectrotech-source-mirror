@@ -85,6 +85,16 @@ int main(int argc, char **argv) {
             require(paths.value(c)==c->path(),"conductor geometry unchanged");
             require(labels.value(c)==c->properties().text,"visible label unchanged");
         }
+        // Identifying wires must not depend on a motor current. A
+        // classification-only request with invalid electrical input is valid.
+        QetWirePrecalc::Output invalidSizing;
+        const auto classified=AutoWireProperties::apply(
+            &project,invalidSizing,false,false,true);
+        require(classified.power+classified.control+classified.earth+
+                classified.neutral+classified.unknown==wires.size(),
+                "classification works even without sizing parameters");
+        require(classified.sizedConductors==0,
+                "classification-only mode never writes sections");
         if (result.modified) {
             project.undoStack()->undo();
             for (Conductor *c : wires)
@@ -199,7 +209,8 @@ int main(int argc, char **argv) {
         require(found,"technical fields persist after save and reopen");
         // Exercise the actual Qt dialog with an event-loop-driven test user.
         // No external GUI automation or manual installation is needed.
-        bool sawDialog=false, sawResult=false, dialogTimedOut=false;
+        bool sawDialog=false, sawResult=false, sawGlobalWarning=false,
+             dialogTimedOut=false;
         QTimer poll;
         poll.setInterval(20);
         QObject::connect(&poll, &QTimer::timeout, &app, [&]() {
@@ -214,6 +225,9 @@ int main(int argc, char **argv) {
                         require(combos.size()==3,"supply, pair and safe sizing scope shown");
                         require(combos.at(2)->currentIndex()==1,
                                 "with no selection the default is classification only");
+                        // Exercise the explicit all-circuits option, including
+                        // its required electrical safety confirmation.
+                        combos.at(2)->setCurrentIndex(2);
                         require(fields.size()==6,"all six electrical quantities shown");
                         // Check the former 10 W minimum bug: 24 V x
                         // 0.05 A x 0.85 = 1.02 W, not 10 W.
@@ -244,6 +258,10 @@ int main(int argc, char **argv) {
                     }
                 }
                 if (auto *message=qobject_cast<QMessageBox*>(window)) {
+                    if (message->windowTitle().contains(QStringLiteral("Dimensionamento global não verificado"))) {
+                        sawGlobalWarning=true;
+                        message->done(QMessageBox::Yes);
+                    }
                     if (message->windowTitle().contains(QStringLiteral("Pré-dimensionamento aplicado"))) {
                         sawResult=true;
                         message->accept();
@@ -264,7 +282,8 @@ int main(int argc, char **argv) {
         AutoWireProperties::run(nullptr, &reopened);
         poll.stop();
         watchdog.stop();
-        require(!dialogTimedOut && sawDialog && sawResult,"Qt dialog and completion message succeeded");
+        require(!dialogTimedOut && sawDialog && sawResult && sawGlobalWarning,
+                "Qt inputs, advanced scope warning and completion succeeded");
         std::printf("PASS QET Qt dialog: voltage+power pair, preview, apply, confirmation\n");
 
         std::printf("PASS QET native integration: %d wires, %d auto-changed, %d unknown, persisted, undo-redo, preserved geometry\n",
