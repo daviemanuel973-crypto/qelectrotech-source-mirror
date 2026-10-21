@@ -18,5 +18,7 @@ int main() {
     q.current=5000.;q.known=KnownPair::VoltageCurrent;a=calculate(q);assert(a.valid&&!a.withinTable);
     assert(near(peSection(4.),4.)&&near(peSection(25.),16.)&&near(peSection(50.),25.));
     q.current=10.;q.lengthMeters=-1.;a=calculate(q);assert(!a.valid);
+    q.lengthMeters=0.;a=calculate(q);assert(!a.valid);
+    q.lengthMeters=0.01;a=calculate(q);assert(a.valid);
     std::cout<<"Testes do dimensionamento: OK\n";
 }
