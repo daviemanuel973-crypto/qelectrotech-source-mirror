@@ -18,6 +18,9 @@
 #include <QList>
 #include <QStringList>
 #include <QMessageBox>
+#include <QInputDialog>
+#include <QRegularExpression>
+#include <QQueue>
 #include <algorithm>
 #include <utility>
 
@@ -42,6 +45,16 @@ struct PotentialGroup {
     bool hasUnconnectedEndpoint = false;
     bool spansFolios() const { return folios.size() > 1; }
 };
+struct DevicePassage {
+    int a=-1, b=-1;
+    QString elementId, label, pinA, pinB, behaviour;
+    QString page;
+    bool traversable=true;
+};
+struct ReportHop {
+    int a=-1, b=-1;
+    QString source, destination, fromPage, toPage;
+};
 struct Snapshot {
     int folios = 0;
     int elements = 0;
@@ -51,6 +64,10 @@ struct Snapshot {
     int invalidEndpoints = 0;
     int multiFolioPotentials = 0;
     int elementsLinkingPotentials = 0;
+    int unmatchedReports = 0;
+    int unsupportedMultiTerminal = 0;
+    QList<DevicePassage> passages;
+    QList<ReportHop> reportHops;
     QList<PotentialGroup> groups;
     QHash<Conductor *,int> groupByConductor;
     QStringList elementInventory;
@@ -58,6 +75,52 @@ struct Snapshot {
     QStringList folioInventory;
     QStringList warnings;
     bool complete = false;
+    // 'complete' refers to topology index coverage, not certified electric design.
+    QString pathReport(int start) const {
+        QStringList out;
+        if (start<0 || start>=groups.size())
+            return QStringLiteral("Selecione um potencial rastreado válido.");
+        out << QStringLiteral("PERCURSO ELÉTRICO DESDE O POTENCIAL %1")
+                   .arg(start+1);
+        out << QStringLiteral("Setas entre folhas: ligações nativas NextReport/PreviousReport.");
+        out << QStringLiteral(
+            "ATENÇÃO: atravessar um dispositivo mostra um CAMINHO POSSÍVEL, "
+            "não confirma que contatos estão fechados ou que todas as "
+            "cargas conduzem corrente simultaneamente.");
+        QSet<int> visited;
+        QQueue<int> pending;
+        visited.insert(start);
+        pending.enqueue(start);
+        while(!pending.isEmpty()) {
+            const int groupId=pending.dequeue();
+            out << QStringLiteral("NÓ %1: %2").arg(groupId+1)
+                       .arg(potentialSummary(groupId));
+            for(const ReportHop &hop:reportHops) {
+                if(hop.a==groupId || hop.b==groupId)
+                    out << QStringLiteral("  SETA ENTRE FOLHAS: %1 (pág. %2) -> %3 (pág. %4)")
+                        .arg(hop.source,hop.fromPage,hop.destination,hop.toPage);
+            }
+            for(const DevicePassage &arc:passages) {
+                const int other=arc.a==groupId ? arc.b :
+                                arc.b==groupId ? arc.a : -1;
+                if(other<0) continue;
+                out << QStringLiteral("  PELO ELEMENTO %1 [%2], pág. %3: %4 -> %5; "
+                                      "potencial %6 -> %7; %8")
+                       .arg(arc.label,arc.elementId,arc.page,
+                            arc.a==groupId ? arc.pinA : arc.pinB,
+                            arc.a==groupId ? arc.pinB : arc.pinA)
+                       .arg(groupId+1).arg(other+1).arg(arc.behaviour);
+                if(arc.traversable && !visited.contains(other)) {
+                    visited.insert(other);
+                    pending.enqueue(other);
+                }
+            }
+        }
+        out << QStringLiteral("NÓS ALCANÇADOS (CAMINHOS POSSÍVEIS): %1 de %2")
+                   .arg(visited.size()).arg(groups.size());
+        out << QStringLiteral("Não foi calculada nem aplicada bitola por este rastreamento.");
+        return out.join(QLatin1Char('\n'));
+    }
     // A trace potential is one equipotential node, NOT a complete load circuit.
     // This short description helps select the corresponding wires without
     // requiring users to manually find every segment in the drawing.
@@ -97,6 +160,8 @@ struct Snapshot {
                    .arg(groups.size()).arg(multiFolioPotentials);
         out << QStringLiteral("Elementos ligados a 2+ potenciais: %1")
                    .arg(elementsLinkingPotentials);
+        out << QStringLiteral("Passagens por dispositivos: %1 | Setas vinculadas: %2 | Setas sem par: %3")
+                   .arg(passages.size()).arg(reportHops.size()).arg(unmatchedReports);
         out << QStringLiteral("Terminais sem fio: %1 | Ligações com terminal inválido: %2")
                    .arg(openTerminals).arg(invalidEndpoints);
         out << QStringLiteral("Cobertura do grafo: %1")
@@ -112,6 +177,16 @@ struct Snapshot {
         out << elementInventory;
         out << QStringLiteral("===== ELEMENTOS ENTRE POTENCIAIS (SEM ASSUMIR CONTATO FECHADO) =====");
         out << componentConnections;
+        out << QStringLiteral("===== PERCURSO ATRAVÉS DE DISPOSITIVOS (NÃO É UMA EMENDA) =====");
+        for(const DevicePassage &arc:passages)
+            out << QStringLiteral("pág. %1 | %2 [%3] | %4 (P%5) => %6 (P%7) | %8")
+                .arg(arc.page,arc.label,arc.elementId,arc.pinA)
+                .arg(arc.a+1).arg(arc.pinB).arg(arc.b+1).arg(arc.behaviour);
+        out << QStringLiteral("===== CONTINUIDADE ENTRE FOLHAS PELAS SETAS =====");
+        for(const ReportHop &hop:reportHops)
+            out << QStringLiteral("%1 [pág. %2] => %3 [pág. %4] | grupos: %5 / %6")
+                .arg(hop.source,hop.fromPage,hop.destination,hop.toPage)
+                .arg(hop.a+1).arg(hop.b+1);
         out << QStringLiteral("===== POTENCIAIS ELÉTRICOS =====");
         for (int i=0;i<groups.size();++i) {
             const PotentialGroup &g=groups.at(i);
@@ -166,6 +241,86 @@ inline bool isElectricalDataKey(const QString &key) {
            k.contains(QStringLiteral("efficien")) ||
            k.contains(QStringLiteral("cosphi"));
 }
+// Report folio arrows are linked as project symbols; never pair them
+// merely because their labels look alike.
+inline int groupAtTerminal(const Snapshot &snap, const Terminal *terminal) {
+    if (!terminal) return -1;
+    for (Conductor *wire : terminal->conductors()) {
+        const int id=snap.groupByConductor.value(wire,-1);
+        if(id>=0) return id;
+    }
+    return -1;
+}
+inline QString normalizedPin(const QString &label) {
+    QString v=label.trimmed().toUpper();
+    v.remove(QRegularExpression(QStringLiteral("[\\s._-]")));
+    return v;
+}
+// Named pin pairs: main poles, auxiliary/thermal contacts, windings.
+// No fallback "connect every terminal": multi-pole components would short.
+inline QList<QPair<QString,QString>> namedPairs() {
+    return {
+        {QStringLiteral("1"),QStringLiteral("2")},
+        {QStringLiteral("3"),QStringLiteral("4")},
+        {QStringLiteral("5"),QStringLiteral("6")},
+        {QStringLiteral("7"),QStringLiteral("8")},
+        {QStringLiteral("1L1"),QStringLiteral("2T1")},
+        {QStringLiteral("3L2"),QStringLiteral("4T2")},
+        {QStringLiteral("5L3"),QStringLiteral("6T3")},
+        {QStringLiteral("L1"),QStringLiteral("T1")},
+        {QStringLiteral("L2"),QStringLiteral("T2")},
+        {QStringLiteral("L3"),QStringLiteral("T3")},
+        {QStringLiteral("13"),QStringLiteral("14")},
+        {QStringLiteral("21"),QStringLiteral("22")},
+        {QStringLiteral("23"),QStringLiteral("24")},
+        {QStringLiteral("31"),QStringLiteral("32")},
+        {QStringLiteral("33"),QStringLiteral("34")},
+        {QStringLiteral("41"),QStringLiteral("42")},
+        {QStringLiteral("43"),QStringLiteral("44")},
+        {QStringLiteral("53"),QStringLiteral("54")},
+        {QStringLiteral("61"),QStringLiteral("62")},
+        {QStringLiteral("71"),QStringLiteral("72")},
+        {QStringLiteral("81"),QStringLiteral("82")},
+        {QStringLiteral("95"),QStringLiteral("96")},
+        {QStringLiteral("97"),QStringLiteral("98")},
+        {QStringLiteral("A1"),QStringLiteral("A2")},
+        {QStringLiteral("U1"),QStringLiteral("U2")},
+        {QStringLiteral("V1"),QStringLiteral("V2")},
+        {QStringLiteral("W1"),QStringLiteral("W2")}
+    };
+}
+inline QString deviceBehaviour(const Element *element,const QString &pa,
+                               const QString &pb) {
+    const QString n=element ? element->name().toLower() : QString();
+    if((pa==QStringLiteral("A1") && pb==QStringLiteral("A2")) ||
+       n.contains(QStringLiteral("bobina")) ||
+       n.contains(QStringLiteral("coil")) ||
+       n.contains(QStringLiteral("motor")) ||
+       n.contains(QStringLiteral("lamp")) ||
+       n.contains(QStringLiteral("lâmpada")) ||
+       n.contains(QStringLiteral("resistor")))
+        return QStringLiteral("CARGA: entrada/saída do dispositivo, não continuidade de fio");
+    if(n.contains(QStringLiteral("transform")) ||
+       n.contains(QStringLiteral("alimentação")) ||
+       n.contains(QStringLiteral("power supply")) ||
+       n.contains(QStringLiteral("fonte")) ||
+       n.contains(QStringLiteral("rectifier")) ||
+       n.contains(QStringLiteral("retificador")))
+        return QStringLiteral("CONVERSÃO: não transmitir tensão/corrente entre domínios");
+    if(n.contains(QStringLiteral("contact")) ||
+       n.contains(QStringLiteral("contato")) ||
+       n.contains(QStringLiteral("disjuntor")) ||
+       n.contains(QStringLiteral("breaker")) ||
+       n.contains(QStringLiteral("fusível")) ||
+       n.contains(QStringLiteral("fuse")) ||
+       n.contains(QStringLiteral("relay")) ||
+       n.contains(QStringLiteral("relé")) ||
+       n.contains(QStringLiteral("selector")) ||
+       n.contains(QStringLiteral("switch")))
+        return QStringLiteral("MANOBRA/PROTEÇÃO: estado do contato não verificado");
+    return QStringLiteral("DISPOSITIVO: conexão interna não verificada");
+}
+
 inline Snapshot scan(QETProject *project) {
     Snapshot snap;
     if (!project) {
@@ -309,14 +464,158 @@ inline Snapshot scan(QETProject *project) {
                 .arg(pins.join(QStringLiteral(" | ")));
         }
     }
-    snap.complete=(snap.invalidEndpoints==0 && snap.groupByConductor.size()==available.size());
+    // Third graph layer: follow port-to-port passage through recognized
+    // component pin pairs WITHOUT equating their potentials. This allows
+    // tracing past contactors, protectors and loads on subsequent sheets.
+    QSet<QString> processedArrows;
+    for(Diagram *folio:allFolios) {
+        if(!folio) continue;
+        for(Element *e:folio->elements()) {
+            if(!e) continue;
+            const QList<Terminal *> pins=e->terminals();
+            if(e->linkType() & Element::AllReport) {
+                const QList<Element *> partners=e->linkedElements();
+                if(partners.isEmpty()) {
+                    if(!e->conductors().isEmpty()) {
+                        ++snap.unmatchedReports;
+                        snap.warnings << QStringLiteral(
+                            "SETA SEM VÍNCULO: pág.%1 %2 (%3)")
+                            .arg(folio->folioIndex()+1)
+                            .arg(safeText(e->actualLabel()),shortUuid(e->uuid()));
+                    }
+                    continue;
+                }
+                for(Element *other:partners) {
+                    if(!other || !(other->linkType() & Element::AllReport)) continue;
+                    const QString left=e->uuid().toString(), right=other->uuid().toString();
+                    const QString key=left<right ? left+right : right+left;
+                    if(processedArrows.contains(key)) continue;
+                    processedArrows.insert(key);
+                    const int from=pins.isEmpty() ? -1 : groupAtTerminal(snap,pins.first());
+                    const QList<Terminal *> peerPins=other->terminals();
+                    const int dest=peerPins.isEmpty() ? -1 :
+                                   groupAtTerminal(snap,peerPins.first());
+                    if(from<0 || dest<0) continue;
+                    ReportHop hop;
+                    hop.a=from;hop.b=dest;
+                    hop.source=safeText(e->actualLabel());
+                    hop.destination=safeText(other->actualLabel());
+                    hop.fromPage=QString::number(folio->folioIndex()+1);
+                    hop.toPage=other->diagram() ?
+                        QString::number(other->diagram()->folioIndex()+1) :
+                        QStringLiteral("?");
+                    snap.reportHops << hop;
+                    if(from!=dest) {
+                        snap.warnings << QStringLiteral(
+                            "ERRO DE CONTINUIDADE: seta vinculada %1 / %2 "
+                            "aparece em dois potenciais separados (%3/%4).")
+                            .arg(hop.source,hop.destination)
+                            .arg(from+1).arg(dest+1);
+                        ++snap.unmatchedReports;
+                    }
+                }
+                continue;
+            }
+            if(e->linkType() & Element::Terminale) continue;
+            QHash<QString,Terminal *> pinsByName;
+            QSet<QString> duplicates;
+            for(Terminal *pin:pins) {
+                if(!pin) continue;
+                const QString name=normalizedPin(pin->name());
+                if(name.isEmpty()) continue;
+                if(pinsByName.contains(name)) duplicates.insert(name);
+                else pinsByName.insert(name,pin);
+            }
+            auto addPassage=[&](Terminal *a,Terminal *b) {
+                if(!a || !b || a==b) return;
+                const int ga=groupAtTerminal(snap,a),gb=groupAtTerminal(snap,b);
+                if(ga<0 || gb<0 || ga==gb) return;
+                const QString pa=normalizedPin(a->name()),pb=normalizedPin(b->name());
+                DevicePassage arc;
+                arc.a=ga;arc.b=gb;arc.elementId=shortUuid(e->uuid());
+                arc.label=safeText(e->actualLabel())+QStringLiteral(" ")+safeText(e->name());
+                arc.page=QString::number(folio->folioIndex()+1);
+                arc.pinA=safeText(a->name());arc.pinB=safeText(b->name());
+                arc.behaviour=deviceBehaviour(e,pa,pb);
+                snap.passages << arc;
+            };
+            int identifiedPairs=0;
+            QSet<QString> usedPairs;
+            for(const auto &pr:namedPairs()) {
+                if(duplicates.contains(pr.first) || duplicates.contains(pr.second))
+                    continue;
+                Terminal *a=pinsByName.value(pr.first,nullptr);
+                Terminal *b=pinsByName.value(pr.second,nullptr);
+                if(!a || !b || a==b) continue;
+                // Don't pair a bare '1/2' if a more specific name also
+                // identifies these pins; each pair represents one port path.
+                const QString key=shortUuid(a->uuid())+shortUuid(b->uuid());
+                if(usedPairs.contains(key)) continue;
+                usedPairs.insert(key);
+                ++identifiedPairs;
+                addPassage(a,b);
+            }
+            // A two-pin symbol has a single visible path. The report
+            // explicitly marks its electrical behaviour as unverified.
+            if(pins.size()==2 && !identifiedPairs) {
+                ++identifiedPairs;
+                addPassage(pins.at(0),pins.at(1));
+            }
+            if(pins.size()>2 && identifiedPairs==0 &&
+               e->conductors().size()>1) {
+                ++snap.unsupportedMultiTerminal;
+                snap.warnings << QStringLiteral(
+                    "TERMINAIS SEM PARES DEFINIDOS: pág.%1 %2 [%3]. "
+                    "Não é seguro ligar todos os bornes do símbolo.")
+                    .arg(folio->folioIndex()+1)
+                    .arg(safeText(e->actualLabel()),safeText(e->name()));
+            }
+        }
+    }
+    snap.complete=(snap.invalidEndpoints==0 &&
+                   snap.unmatchedReports==0 &&
+                   snap.groupByConductor.size()==available.size());
     if (!snap.complete)
         snap.warnings << QStringLiteral(
-            "INCONSISTÊNCIA: há fios não rastreados ou com extremidades ausentes.");
+            "INCONSISTÊNCIA: existem fios sem rastreamento, terminais inválidos "
+            "ou setas sem vínculo; o pré-dimensionamento permanece bloqueado.");
     if (snap.openTerminals)
         snap.warnings << QStringLiteral(
             "OBSERVAÇÃO: terminais livres podem ser intencionais, mas precisam de revisão.");
     return snap;
+}
+inline void showPaths(QWidget *parent, QETProject *project) {
+    const Snapshot graph=scan(project);
+    if(graph.groups.isEmpty()) {
+        QMessageBox::information(parent,QObject::tr("Percorrer circuito"),
+            QObject::tr("Nenhum fio foi encontrado."));return;
+    }
+    int start=-1;
+    for(int i=0;i<graph.groups.size();++i) {
+        for(Conductor *wire:graph.groups.at(i).conductors)
+            if(wire && wire->isSelected()) {start=i;break;}
+        if(start>=0)break;
+    }
+    if(start<0) {
+        QStringList choices;
+        for(int i=0;i<graph.groups.size();++i)
+            choices<<graph.potentialSummary(i);
+        bool ok=false;
+        const QString choice=QInputDialog::getItem(
+            parent,QObject::tr("Percorrer elementos e setas entre folhas"),
+            QObject::tr("Selecione o potencial de partida:"),choices,0,false,&ok);
+        if(!ok || choice.isEmpty())return;
+        start=choices.indexOf(choice);
+    }
+    QMessageBox box(QMessageBox::Information,
+        QObject::tr("Percurso do circuito entre elementos e folhas"),
+        QObject::tr("Ponto inicial: potencial %1. O percurso segue pelos "
+                    "dispositivos e pelas setas de continuação entre folhas. "
+                    "Estados de contato e dados nominais permanecem "
+                    "não verificados. Clique em 'Mostrar detalhes'.")
+          .arg(start+1),QMessageBox::Ok,parent);
+    box.setDetailedText(graph.pathReport(start));
+    box.exec();
 }
 inline void showReport(QWidget *parent, QETProject *project) {
     const Snapshot result=scan(project);
