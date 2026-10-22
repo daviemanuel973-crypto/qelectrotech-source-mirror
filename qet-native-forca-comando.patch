@@ -34,7 +34,7 @@ diff --git a/sources/automation/autowireproperties.h b/sources/automation/autowi
 new file mode 100644
 --- /dev/null
 +++ b/sources/automation/autowireproperties.h
-@@ -0,0 +1,626 @@
+@@ -0,0 +1,692 @@
 +/*
 + * QElectroTech - automatic educational power/control wire properties.
 + * Copyright 2026. Distributed under GPL-2.0-or-later, compatible with QET.
@@ -63,6 +63,9 @@ new file mode 100644
 +#include <QLabel>
 +#include <QSignalBlocker>
 +#include <QPushButton>
++#include <QListWidget>
++#include <QLineEdit>
++#include <QAbstractItemView>
 +#include <QRegularExpression>
 +#include <QVariant>
 +#include <QStringList>
@@ -249,7 +252,8 @@ new file mode 100644
 +}
 +
 +inline Result apply(QETProject *project, const QetWirePrecalc::Output &sizing,
-+                    bool overwrite = false, bool classificationOnly = false) {
++                    bool overwrite = false, bool classificationOnly = false,
++                    const QSet<int> &chosenPotentials = {}) {
 +    Result result;
 +    if (!project || project->isReadOnly() || !project->undoStack() ||
 +        (!classificationOnly && (!sizing.valid || !sizing.withinTable)))
@@ -285,12 +289,23 @@ new file mode 100644
 +    // User-selected wires are explicit sizing targets. Include their exact
 +    // continuous potentials, but NEVER cross a contactor, fuse, switch,
 +    // motor or function-isolating terminal to another electrical circuit.
-+    for (Conductor *c : wires) {
-+        if (!c || !c->isSelected()) continue;
-+        const int groupId = trace.groupByConductor.value(c, -1);
-+        if (groupId < 0 || groupId >= trace.groups.size()) continue;
-+        for (Conductor *member : trace.groups.at(groupId).conductors)
-+            selectedCircuit.insert(member);
++    if (!chosenPotentials.isEmpty()) {
++        // An explicit trace-picker selection overrides graphical selection.
++        // Every candidate is a SINGLE potential, never an assumed whole
++        // motor circuit across a contactor, fuse or protection element.
++        for (int groupId : chosenPotentials) {
++            if (groupId < 0 || groupId >= trace.groups.size()) return result;
++            for (Conductor *member : trace.groups.at(groupId).conductors)
++                selectedCircuit.insert(member);
++        }
++    } else {
++        for (Conductor *c : wires) {
++            if (!c || !c->isSelected()) continue;
++            const int groupId = trace.groupByConductor.value(c, -1);
++            if (groupId < 0 || groupId >= trace.groups.size()) continue;
++            for (Conductor *member : trace.groups.at(groupId).conductors)
++                selectedCircuit.insert(member);
++        }
 +    }
 +    selectedCircuit.intersect(available);
 +    // A single motor load NEVER represents the whole panel. Global
@@ -440,22 +455,27 @@ new file mode 100644
 +        if (d)
 +            for (Conductor *c : DiagramContent(d, false).conductors())
 +                if (c && c->isSelected()) ++selectedWires;
++    QSet<int> chosenPotentials;
 +    auto *scope = new QComboBox;
-+    scope->addItem(QObject::tr("Dimensionar apenas os fios selecionados e o mesmo potencial"));
++    scope->addItem(QObject::tr("Dimensionar potenciais escolhidos no rastreador ou no desenho"));
 +    scope->addItem(QObject::tr("Apenas identificar fios, sem dimensionar"));
 +    if (!selectedWires) scope->setCurrentIndex(1);
 +    form->addRow(QObject::tr("Escopo do cálculo:"), scope);
++    auto *choosePotentialBtn = new QPushButton(
++        QObject::tr("Escolher fios pelo rastreador (páginas, elementos e potenciais)..."), &dialog);
++    layout->addWidget(choosePotentialBtn);
 +    auto *scopeHelp = new QLabel(&dialog);
 +    auto updateScopeHelp = [&]() {
 +        if (scope->currentIndex() == 1)
 +            scopeHelp->setText(QObject::tr(
-+                "MODO IDENTIFICAÇÃO: não dimensiona NENHUM fio. "
-+                "Seções e tensões continuarão vazias se não tiverem sido informadas."));
++                "MODO IDENTIFICAÇÃO: NÃO dimensiona. Para escolher os fios sem "
++                "selecioná-los no desenho, clique em 'Escolher fios pelo rastreador'."));
 +        else if (scope->currentIndex() == 0)
 +            scopeHelp->setText(QObject::tr(
-+                "Fios selecionados: %1. Selecione todas as fases do mesmo circuito "
-+                "ANTES de abrir a janela. Nenhum outro circuito receberá esta seção.")
-+                .arg(selectedWires));
++                "Fios selecionados no desenho: %1 | Potenciais escolhidos no rastreador: %2. "
++                "Escolha APENAS os potenciais da mesma carga; não agrupe alimentadores "
++                "e comandos com correntes diferentes.")
++                .arg(selectedWires).arg(chosenPotentials.size()));
 +    };
 +    scopeHelp->setWordWrap(true);
 +    layout->addWidget(scopeHelp);
@@ -524,7 +544,7 @@ new file mode 100644
 +            (known != 2 || (latest.voltage >= voltage->minimum() &&
 +                            latest.voltage <= voltage->maximum()));
 +        const bool wantsSizing = scope->currentIndex() != 1;
-+        const bool hasCircuit = selectedWires > 0;
++        const bool hasCircuit = selectedWires > 0 || !chosenPotentials.isEmpty();
 +        // Classifying a diagram is independent of the motor current.
 +        // Invalid sizing must never disable classification-only mode.
 +        const bool ok = scope->currentIndex() == 1 ||
@@ -535,8 +555,8 @@ new file mode 100644
 +        if (scope->currentIndex() == 1)
 +            preview->setText(QObject::tr(
 +                "IDENTIFICAÇÃO APENAS: os valores de tensão, corrente e potência "
-+                "NÃO SERÃO USADOS. Para calcular seção, cancele, selecione "
-+                "os fios do circuito no desenho e reabra esta ferramenta."));
++                "NÃO SERÃO USADOS. Use o seletor de potenciais rastreados "
++                "para dimensionar sem caçar fios manualmente no desenho."));
 +        else if (!preflight.complete)
 +            preview->setText(QObject::tr("Rastreamento incompleto: dimensionamento bloqueado."));
 +        else if (!latest.valid) preview->setText(QObject::tr("Valores inválidos."));
@@ -557,6 +577,52 @@ new file mode 100644
 +                        "Seção/tensão somente nos potenciais selecionados; "
 +                        "outras cargas não recebem este dimensionamento.")));
 +    };
++    QObject::connect(choosePotentialBtn, &QPushButton::clicked, &dialog, [&]() {
++        // Select from the preflight graph, not from an ungrounded global load.
++        QDialog selector(&dialog);
++        selector.setWindowTitle(QObject::tr("Selecionar potenciais do mesmo circuito"));
++        selector.resize(860, 560);
++        auto *selLayout = new QVBoxLayout(&selector);
++        auto *notice = new QLabel(QObject::tr(
++            "Cada linha é um potencial contínuo. Você pode escolher vários "
++            "potenciais (por exemplo, L1/L2/L3 do mesmo motor), mas a "
++            "continuidade NÃO prova que possuem a mesma carga ou corrente. "
++            "Confirme a alimentação e os dispositivos antes de aplicar."), &selector);
++        notice->setWordWrap(true);
++        selLayout->addWidget(notice);
++        auto *filter = new QLineEdit(&selector);
++        filter->setPlaceholderText(QObject::tr(
++            "Filtrar por página, número do potencial, elemento ou identificação..."));
++        selLayout->addWidget(filter);
++        auto *potentialList = new QListWidget(&selector);
++        potentialList->setObjectName(QStringLiteral("qet_trace_potential_list"));
++        potentialList->setSelectionMode(QAbstractItemView::ExtendedSelection);
++        for (int i=0; i<preflight.groups.size(); ++i) {
++            auto *item = new QListWidgetItem(preflight.potentialSummary(i), potentialList);
++            item->setData(Qt::UserRole, i);
++            if (chosenPotentials.contains(i)) item->setSelected(true);
++        }
++        QObject::connect(filter, &QLineEdit::textChanged, &selector,
++            [potentialList](const QString &term) {
++                for (int i=0;i<potentialList->count();++i) {
++                    auto *item=potentialList->item(i);
++                    item->setHidden(!item->text().contains(term,Qt::CaseInsensitive));
++                }
++            });
++        selLayout->addWidget(potentialList);
++        auto *selButtons = new QDialogButtonBox(
++            QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &selector);
++        selLayout->addWidget(selButtons);
++        QObject::connect(selButtons, &QDialogButtonBox::accepted, &selector, &QDialog::accept);
++        QObject::connect(selButtons, &QDialogButtonBox::rejected, &selector, &QDialog::reject);
++        if (selector.exec() != QDialog::Accepted) return;
++        chosenPotentials.clear();
++        for (QListWidgetItem *item : potentialList->selectedItems())
++            chosenPotentials.insert(item->data(Qt::UserRole).toInt());
++        if (!chosenPotentials.isEmpty()) scope->setCurrentIndex(0);
++        else if (!selectedWires) scope->setCurrentIndex(1);
++        refresh();
++    });
 +    QObject::connect(supply, QOverload<int>::of(&QComboBox::currentIndexChanged), &dialog, refresh);
 +    QObject::connect(pair, QOverload<int>::of(&QComboBox::currentIndexChanged), &dialog, refresh);
 +    QObject::connect(scope, QOverload<int>::of(&QComboBox::currentIndexChanged), &dialog, refresh);
@@ -571,7 +637,7 @@ new file mode 100644
 +    // Without electrical data for every load, global sizing is unsafe.
 +    // Index 1 is classification only; other circuits remain untouched.
 +    const Result r = apply(project, latest, overwrite->isChecked(),
-+                           classificationOnly);
++                           classificationOnly, chosenPotentials);
 +    if (!r.traceComplete && !classificationOnly) {
 +        QMessageBox::warning(parent, QObject::tr("Rastreamento incompleto"),
 +            QObject::tr("Não foi possível percorrer todos os fios/terminais. "
