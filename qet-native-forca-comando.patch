@@ -34,7 +34,7 @@ diff --git a/sources/automation/autowireproperties.h b/sources/automation/autowi
 new file mode 100644
 --- /dev/null
 +++ b/sources/automation/autowireproperties.h
-@@ -0,0 +1,693 @@
+@@ -0,0 +1,706 @@
 +/*
 + * QElectroTech - automatic educational power/control wire properties.
 + * Copyright 2026. Distributed under GPL-2.0-or-later, compatible with QET.
@@ -617,9 +617,22 @@ new file mode 100644
 +        QObject::connect(selButtons, &QDialogButtonBox::accepted, &selector, &QDialog::accept);
 +        QObject::connect(selButtons, &QDialogButtonBox::rejected, &selector, &QDialog::reject);
 +        if (selector.exec() != QDialog::Accepted) return;
-+        chosenPotentials.clear();
++        QSet<int> requestedGroups;
 +        for (QListWidgetItem *item : potentialList->selectedItems())
-+            chosenPotentials.insert(item->data(Qt::UserRole).toInt());
++            requestedGroups.insert(item->data(Qt::UserRole).toInt());
++        if (requestedGroups.size()>1 &&
++            QMessageBox::warning(&dialog,
++                QObject::tr("Confirmar potenciais da mesma carga"),
++                QObject::tr("Você selecionou %1 potenciais. O rastreamento "
++                            "NÃO comprova que eles pertencem à mesma carga. "
++                            "Confirme que todas as fases/trechos selecionados "
++                            "usam a MESMA corrente nominal, tensão, comprimento "
++                            "e condições de instalação antes de continuar.")
++                    .arg(requestedGroups.size()),
++                QMessageBox::Yes | QMessageBox::No,
++                QMessageBox::No)!=QMessageBox::Yes)
++            return;
++        chosenPotentials=requestedGroups;
 +        if (!chosenPotentials.isEmpty()) scope->setCurrentIndex(0);
 +        else if (!selectedWires) scope->setCurrentIndex(1);
 +        refresh();
