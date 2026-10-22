@@ -78,10 +78,15 @@ struct Snapshot {
             devices = devices.mid(0,4);
             devices << QStringLiteral("...");
         }
-        return QStringLiteral("Potencial %1 | %2 fio(s) | Página(s) %3 | %4")
+        const QString evidence=g.declaredData.isEmpty() ?
+            QStringLiteral("dados elétricos nominais não localizados") :
+            QStringLiteral("dados declarados: %1")
+                .arg(g.declaredData.mid(0,2).join(QStringLiteral("; ")));
+        return QStringLiteral("Potencial %1 | %2 fio(s) | Página(s) %3 | %4 | %5")
             .arg(groupIndex+1).arg(g.conductors.size())
             .arg(pages.join(QStringLiteral(", ")))
-            .arg(devices.join(QStringLiteral("; ")));
+            .arg(devices.join(QStringLiteral("; ")))
+            .arg(evidence);
     }
     QString report() const {
         QStringList out;
