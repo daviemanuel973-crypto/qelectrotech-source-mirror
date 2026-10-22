@@ -50,9 +50,11 @@ struct Snapshot {
     int openTerminals = 0;
     int invalidEndpoints = 0;
     int multiFolioPotentials = 0;
+    int elementsLinkingPotentials = 0;
     QList<PotentialGroup> groups;
     QHash<Conductor *,int> groupByConductor;
     QStringList elementInventory;
+    QStringList componentConnections;
     QStringList folioInventory;
     QStringList warnings;
     bool complete = false;
@@ -63,6 +65,8 @@ struct Snapshot {
                    .arg(folios).arg(elements).arg(terminals).arg(wires);
         out << QStringLiteral("Potenciais distintos: %1 | Potenciais entre páginas: %2")
                    .arg(groups.size()).arg(multiFolioPotentials);
+        out << QStringLiteral("Elementos ligados a 2+ potenciais: %1")
+                   .arg(elementsLinkingPotentials);
         out << QStringLiteral("Terminais sem fio: %1 | Ligações com terminal inválido: %2")
                    .arg(openTerminals).arg(invalidEndpoints);
         out << QStringLiteral("Cobertura do grafo: %1")
@@ -76,6 +80,8 @@ struct Snapshot {
         out << folioInventory;
         out << QStringLiteral("===== ELEMENTOS E TERMINAIS =====");
         out << elementInventory;
+        out << QStringLiteral("===== ELEMENTOS ENTRE POTENCIAIS (SEM ASSUMIR CONTATO FECHADO) =====");
+        out << componentConnections;
         out << QStringLiteral("===== POTENCIAIS ELÉTRICOS =====");
         for (int i=0;i<groups.size();++i) {
             const PotentialGroup &g=groups.at(i);
@@ -233,6 +239,45 @@ inline Snapshot scan(QETProject *project) {
         group.declaredData.sort();
         if (group.spansFolios()) ++snap.multiFolioPotentials;
         snap.groups << group;
+    }
+    // Build the second layer: which electrically distinct potentials touch
+    // the terminals of each component? This is an incidence graph, NEVER
+    // a claim that a switch/contact is closed or a transformer is a wire.
+    for (Diagram *folio : allFolios) {
+        if (!folio) continue;
+        for (Element *element : folio->elements()) {
+            if (!element) continue;
+            QSet<int> adjacent;
+            QStringList pins;
+            for (Terminal *terminal : element->terminals()) {
+                if (!terminal) continue;
+                QSet<int> terminalPotentials;
+                for (Conductor *wire : terminal->conductors()) {
+                    const int groupId=snap.groupByConductor.value(wire,-1);
+                    if (groupId < 0) continue;
+                    terminalPotentials.insert(groupId);
+                    adjacent.insert(groupId);
+                }
+                QStringList refs;
+                for (int id : terminalPotentials) refs << QString::number(id+1);
+                refs.sort();
+                pins << QStringLiteral("%1=>potencial %2")
+                    .arg(safeText(terminal->name()),refs.isEmpty() ?
+                          QStringLiteral("sem fio") : refs.join(QStringLiteral(",")));
+            }
+            if (adjacent.size() > 1) ++snap.elementsLinkingPotentials;
+            QStringList refs;
+            for (int id : adjacent) refs << QString::number(id+1);
+            refs.sort();
+            snap.componentConnections << QStringLiteral(
+                "Pág.%1 | %2 [%3] | potenciais em terminais: %4 | %5")
+                .arg(folio->folioIndex()+1)
+                .arg(safeText(element->actualLabel()))
+                .arg(safeText(element->name()))
+                .arg(refs.isEmpty() ? QStringLiteral("nenhum") :
+                       refs.join(QStringLiteral(",")))
+                .arg(pins.join(QStringLiteral(" | ")));
+        }
     }
     snap.complete=(snap.invalidEndpoints==0 && snap.groupByConductor.size()==available.size());
     if (!snap.complete)
