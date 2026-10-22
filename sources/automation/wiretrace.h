@@ -282,7 +282,12 @@ struct Snapshot {
                    .arg(openTerminals).arg(invalidEndpoints);
         out << QStringLiteral("Cobertura do grafo: %1")
                    .arg(complete ? QStringLiteral("todos os fios foram indexados")
-                                 : QStringLiteral("INCOMPLETA — NÃO DIMENSIONAR"));
+                                 : QStringLiteral("INCOMPLETA — verificar terminais"));
+        out << QStringLiteral("Conexões entre folhas: %1")
+                   .arg(unmatchedReports ?
+                       QStringLiteral("%1 vínculo(s) não resolvido(s); circuitos afetados isolados")
+                           .arg(unmatchedReports) :
+                       QStringLiteral("sem inconsistências detectadas"));
         out << QStringLiteral(
             "ATENÇÃO: continuidade elétrica não prova corrente, tensão, potência, "
             "queda admissível ou seção. Dispositivos de manobra e proteção "
@@ -846,13 +851,23 @@ inline Snapshot scan(QETProject *project) {
             }
         }
     }
+    // Coverage means every physical wire was indexed with valid endpoints.
+    // An unpaired inter-folio arrow is a LOCAL electrical uncertainty, not
+    // evidence that unrelated folios/branches failed to be traced.
+    // Such groups are already marked in unsafeGroups and independently
+    // rejected by canSizeGroup() before any sizing can be applied.
     snap.complete=(snap.invalidEndpoints==0 &&
-                   snap.unmatchedReports==0 &&
                    snap.groupByConductor.size()==available.size());
     if (!snap.complete)
         snap.warnings << QStringLiteral(
-            "INCONSISTÊNCIA: há setas ou extremidades sem ligação. "
-            "Somente os potenciais afetados são bloqueados para dimensionamento.");
+            "RASTREAMENTO INCOMPLETO: faltam fios ou terminais válidos. "
+            "Os potenciais afetados não podem ser dimensionados.");
+    if (snap.unmatchedReports)
+        snap.warnings << QStringLiteral(
+            "SETAS ENTRE FOLHAS COM PROBLEMAS: %1 vínculo(s) não confirmado(s); "
+            "o rastreamento dos demais fios continua válido, mas os potenciais "
+            "das setas envolvidas estão bloqueados para dimensionamento.")
+            .arg(snap.unmatchedReports);
     if (snap.openTerminals)
         snap.warnings << QStringLiteral(
             "OBSERVAÇÃO: terminais livres podem ser intencionais, mas precisam de revisão.");
