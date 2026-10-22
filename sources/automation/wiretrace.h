@@ -131,6 +131,8 @@ struct Snapshot {
         int cursor=from;
         out << QStringLiteral("PARTIDA: %1").arg(potentialSummary(from));
         bool acrossLoad=false,acrossConverter=false,conditional=false,unknown=false;
+        bool exclusiveConflict=false;
+        QSet<QString> usedChangeovers;
         for(int idx:steps) {
             const DevicePassage &arc=passages.at(idx);
             const int next=arc.a==cursor ? arc.b : arc.a;
@@ -140,6 +142,11 @@ struct Snapshot {
                 "P%1 → pág.%2 %3 [%4] (%5 → %6) → P%7 | %8")
                 .arg(cursor+1).arg(arc.page,arc.label,arc.elementId,
                      inputPin,outputPin).arg(next+1).arg(arc.behaviour);
+            if(arc.behaviour.startsWith(QStringLiteral("COMUTADOR"))) {
+                conditional=true;
+                if(usedChangeovers.contains(arc.elementId)) exclusiveConflict=true;
+                usedChangeovers.insert(arc.elementId);
+            }
             conditional |= arc.behaviour.startsWith(QStringLiteral("MANOBRA"));
             acrossLoad |= arc.behaviour.startsWith(QStringLiteral("CARGA"));
             acrossConverter |= arc.behaviour.startsWith(QStringLiteral("CONVERSÃO"));
@@ -154,6 +161,11 @@ struct Snapshot {
         out << QStringLiteral("DESTINO: %1").arg(potentialSummary(to));
         if(conditional)
             out << QStringLiteral("ATENÇÃO: passa por contatos de estado desconhecido.");
+        if(exclusiveConflict)
+            out << QStringLiteral(
+                "ROTA NÃO REALIZÁVEL NUM ÚNICO ESTADO: seria necessário "
+                "atravessar duas vias mutuamente exclusivas do mesmo comutador. "
+                "Esta sequência só demonstra associação no diagrama.");
         if(acrossLoad)
             out << QStringLiteral("ATENÇÃO: passa por uma carga; a corrente pode mudar.");
         if(acrossConverter)
@@ -793,9 +805,14 @@ inline Snapshot scan(QETProject *project) {
                             // a permanent wire; each branch is an
                             // alternative state of the same selector.
                             for(Terminal *pin:throws) {
+                                const int before=snap.passages.size();
                                 addPassage(common,pin);
+                                if(snap.passages.size()>before) {
+                                    snap.passages.last().behaviour=QStringLiteral(
+                                        "COMUTADOR: via alternativa; posição do contato desconhecida");
+                                    ++snap.recoveredChangeoverPassages;
+                                }
                                 ++identifiedPairs;
-                                ++snap.recoveredChangeoverPassages;
                             }
                         }
                     }
