@@ -17,6 +17,8 @@
 #include <QDoubleSpinBox>
 #include <QPushButton>
 #include <QLabel>
+#include <QListWidget>
+#include <QLineEdit>
 #include <stdexcept>
 #include <cstdio>
 #include <cmath>
@@ -180,6 +182,32 @@ int main(int argc, char **argv) {
                     "selected circuit update fully undone");
         selectedPower->setSelected(false);
 
+        // Trace-picker path: no graphic selection, only a potential ID
+        // found by the project-wide topology scan. Other potentials must
+        // keep their previous sections, voltages and labels.
+        const auto postSelection=WireTrace::scan(&project);
+        const int chosenId=postSelection.groupByConductor.value(selectedPower,-1);
+        require(chosenId>=0,"recognized conductor has a trace-group ID");
+        require(!postSelection.potentialSummary(chosenId).isEmpty(),
+                "picker offers a readable folio/element description");
+        QHash<Conductor *,ConductorProperties> beforePicker;
+        for (Conductor *c : wires) beforePicker.insert(c,c->properties());
+        const auto picked=AutoWireProperties::apply(
+            &project,calc,true,false,QSet<int>{chosenId});
+        require(picked.traceComplete && picked.failed==0 && picked.sizedConductors>0,
+                "chosen potential is sized without manual wire selection");
+        for (Conductor *c : wires) {
+            if (postSelection.groupByConductor.value(c,-1)==chosenId) continue;
+            require(c->properties().m_wire_section==beforePicker.value(c).m_wire_section,
+                    "trace picker leaves other circuit sections unchanged");
+            require(c->properties().m_tension_protocol==beforePicker.value(c).m_tension_protocol,
+                    "trace picker leaves other circuit voltage unchanged");
+        }
+        project.undoStack()->undo();
+        for (Conductor *c : wires)
+            require(c->properties()==beforePicker.value(c),
+                    "trace-picked sizing undo fully restores conductor state");
+
         // A single explicit project annotation is authoritative only
         // where it does not contradict device/terminal evidence.
         bool explicitPeObserved=false;
@@ -251,7 +279,7 @@ int main(int argc, char **argv) {
         reopenedWires.first()->setSelected(true);
         // Exercise the actual Qt dialog with an event-loop-driven test user.
         // No external GUI automation or manual installation is needed.
-        bool sawDialog=false, sawResult=false, dialogTimedOut=false;
+        bool sawDialog=false, sawPicker=false, sawResult=false, dialogTimedOut=false;
         int dialogPolls=0;
         QStringList guiHistory;
         QTimer poll;
@@ -261,6 +289,23 @@ int main(int argc, char **argv) {
             for (QWidget *window : QApplication::topLevelWidgets()) {
                 if (!window->isVisible()) continue;
                 if (auto *d=qobject_cast<QDialog*>(window)) {
+                    if (d->windowTitle().contains(QStringLiteral("Selecionar potenciais do mesmo circuito"))) {
+                        if (!sawPicker) {
+                            sawPicker=true;
+                            const auto *traceList=d->findChild<QListWidget*>(
+                                QStringLiteral("qet_trace_potential_list"));
+                            require(traceList && traceList->count()>0,
+                                    "trace picker lists project potential groups");
+                            auto *mutableList=d->findChild<QListWidget*>(
+                                QStringLiteral("qet_trace_potential_list"));
+                            mutableList->item(0)->setSelected(true);
+                            const auto box=d->findChild<QDialogButtonBox*>();
+                            require(box && box->button(QDialogButtonBox::Ok),
+                                    "trace picker has confirmation button");
+                            box->button(QDialogButtonBox::Ok)->click();
+                        }
+                        continue;
+                    }
                     if (d->windowTitle().contains(QStringLiteral("Dimensionamento preliminar"))) {
                         if (sawDialog) continue;
                         sawDialog=true;
@@ -279,6 +324,14 @@ int main(int argc, char **argv) {
                                     "classification only visibly disables V/I/P fields");
                         require(!combos.at(0)->isEnabled() && !combos.at(1)->isEnabled(),
                                 "supply and pair disabled during classification");
+                        // The new picker must let the user select a potential
+                        // from all pages without clicking individual wires.
+                        auto *traceButton=d->findChild<QPushButton*>(
+                            QStringLiteral("qet_pick_trace_potentials"));
+                        require(traceButton!=nullptr,
+                                "project-wide trace picker is present in the sizing UI");
+                        traceButton->click();
+                        require(sawPicker,"trace picker opens and returns selected group");
                         // The explicit single-circuit mode re-enables sizing.
                         combos.at(2)->setCurrentIndex(0);
                         require(combos.at(0)->isEnabled() && combos.at(1)->isEnabled(),
@@ -363,9 +416,9 @@ int main(int argc, char **argv) {
             int(dialogTimedOut),dialogPolls,
             qPrintable(guiHistory.join(QStringLiteral(";"))));
         std::fflush(stdout);
-        require(!dialogTimedOut && sawDialog && sawResult,
-                "Qt inputs, selected circuit sizing and completion succeeded");
-        std::printf("PASS QET Qt dialog: voltage+power pair, preview, apply, confirmation\n");
+        require(!dialogTimedOut && sawDialog && sawPicker && sawResult,
+                "Qt trace picker, selected circuit sizing and completion succeeded");
+        std::printf("PASS QET Qt dialog: voltage+power pair, trace picker, preview, apply, confirmation\n");
 
         std::printf("PASS QET graph tracing: %d folios, %d elements, %d terminals, %d wires, %d potentials\n",
                     topology.folios,topology.elements,topology.terminals,
