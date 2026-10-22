@@ -881,14 +881,32 @@ inline void showPaths(QWidget *parent, QETProject *project) {
         if(!ok || choice.isEmpty())return;
         start=choices.indexOf(choice);
     }
+    if(destination<0) {
+        // A selected wire on another QET folio may not remain selected
+        // when the editor changes sheets. Provide a destination picker,
+        // so multi-folio routes work with only the source wire selected.
+        QStringList destinations;
+        destinations << QObject::tr("Mostrar todos os caminhos possíveis");
+        for(int i=0;i<graph.groups.size();++i)
+            destinations << graph.potentialSummary(i);
+        bool chosen=false;
+        const QString item=QInputDialog::getItem(
+            parent,QObject::tr("Destino do percurso entre folhas"),
+            QObject::tr("Até qual potencial deve seguir o circuito? "
+                        "Ou selecione todos os caminhos possíveis."),
+            destinations,0,false,&chosen);
+        if(!chosen) return;
+        const int index=destinations.indexOf(item);
+        if(index>0) destination=index-1;
+    }
     QMessageBox box(QMessageBox::Information,
         QObject::tr("Percurso do circuito entre elementos e folhas"),
         destination>=0 ?
             QObject::tr("Rota entre potenciais %1 e %2. Clique em 'Mostrar detalhes'.")
                 .arg(start+1).arg(destination+1) :
-            QObject::tr("Partida no potencial %1. Para ver um percurso até "
-                        "um destino específico, selecione DOIS fios no desenho, "
-                        "um na origem e outro no destino. Clique em 'Mostrar detalhes'.")
+            QObject::tr("Partida no potencial %1. A rota inclui elementos "
+                        "intermediários e referências vinculadas entre folhas. "
+                        "Clique em 'Mostrar detalhes'.")
                 .arg(start+1),
         QMessageBox::Ok,parent);
     box.setDetailedText(destination>=0 ?
