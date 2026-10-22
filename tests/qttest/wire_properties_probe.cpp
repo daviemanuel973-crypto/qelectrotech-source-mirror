@@ -264,6 +264,14 @@ int main(int argc, char **argv) {
                         fields.at(0)->setValue(220.);
                         fields.at(2)->setValue(2.2);
                         fields.at(3)->setValue(1.);
+                        require(combos.at(0)->count()==3,"AC two-wire, AC three-phase and DC are available");
+                        combos.at(0)->setCurrentIndex(2);
+                        require(!fields.at(3)->isEnabled(),
+                                "24V DC option disables AC power factor");
+                        fields.at(0)->setValue(24.);
+                        fields.at(2)->setValue(0.24);
+                        require(std::abs(fields.at(1)->value()-10.)<0.0001,
+                                "DC 24V and 240W produces 10A independent of cos(phi)");
                         const auto buttons=d->findChild<QDialogButtonBox*>();
                         require(buttons!=nullptr &&
                                 buttons->button(QDialogButtonBox::Ok)->isEnabled(),
