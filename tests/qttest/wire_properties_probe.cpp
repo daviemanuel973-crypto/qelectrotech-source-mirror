@@ -315,6 +315,13 @@ int main(int argc, char **argv) {
                                 buttons->button(QDialogButtonBox::Ok)->isEnabled(),
                                 "valid voltage+power enables applying");
                         const auto labels=d->findChildren<QLabel*>();
+                        bool topologyPreflight=false;
+                        for (auto *label : labels)
+                            if (label->text().contains(QStringLiteral("RASTREAMENTO PRÉVIO")) &&
+                                label->text().contains(QStringLiteral("potenciais")))
+                                topologyPreflight=true;
+                        require(topologyPreflight,
+                                "topology preflight shown before user applies sizing");
                         bool previewFound=false;
                         for (auto *label : labels)
                             if (label->text().contains(QStringLiteral("Resultado:")))
