@@ -30,7 +30,7 @@ diff --git a/sources/automation/autowireproperties.h b/sources/automation/autowi
 new file mode 100644
 --- /dev/null
 +++ b/sources/automation/autowireproperties.h
-@@ -0,0 +1,596 @@
+@@ -0,0 +1,584 @@
 +/*
 + * QElectroTech - automatic educational power/control wire properties.
 + * Copyright 2026. Distributed under GPL-2.0-or-later, compatible with QET.
@@ -239,8 +239,7 @@ new file mode 100644
 +}
 +
 +inline Result apply(QETProject *project, const QetWirePrecalc::Output &sizing,
-+                    bool overwrite = false, bool allCircuitsSameLoad = false,
-+                    bool classificationOnly = false) {
++                    bool overwrite = false, bool classificationOnly = false) {
 +    Result result;
 +    if (!project || project->isReadOnly() || !project->undoStack() ||
 +        (!classificationOnly && (!sizing.valid || !sizing.withinTable)))
@@ -272,7 +271,9 @@ new file mode 100644
 +        selectedCircuit.unite(c->relatedPotentialConductors(true));
 +    }
 +    selectedCircuit.intersect(available);
-+    if (allCircuitsSameLoad) selectedCircuit = available;
++    // A single motor load NEVER represents the whole panel. Global
++    // sizing has been removed: only explicitly selected potentials may
++    // receive a preliminary conductor section or voltage.
 +    if (classificationOnly) selectedCircuit.clear();
 +
 +    // Stage 2: the QET engine already knows the *electrically continuous*
@@ -412,7 +413,6 @@ new file mode 100644
 +    auto *scope = new QComboBox;
 +    scope->addItem(QObject::tr("Dimensionar apenas os fios selecionados e o mesmo potencial"));
 +    scope->addItem(QObject::tr("Apenas identificar fios, sem dimensionar"));
-+    scope->addItem(QObject::tr("Todos os fios do projeto (mesma carga, avançado)"));
 +    if (!selectedWires) scope->setCurrentIndex(1);
 +    form->addRow(QObject::tr("Escopo do cálculo:"), scope);
 +    auto *scopeHelp = new QLabel(&dialog);
@@ -426,10 +426,6 @@ new file mode 100644
 +                "Fios selecionados: %1. Selecione todas as fases do mesmo circuito "
 +                "ANTES de abrir a janela. Nenhum outro circuito receberá esta seção.")
 +                .arg(selectedWires));
-+        else
-+            scopeHelp->setText(QObject::tr(
-+                "ATENÇÃO: o valor informado será aplicado a todos os circuitos "
-+                "identificados. Não use esta opção em quadros com cargas diferentes."));
 +    };
 +    scopeHelp->setWordWrap(true);
 +    layout->addWidget(scopeHelp);
@@ -497,7 +493,7 @@ new file mode 100644
 +            (known != 2 || (latest.voltage >= voltage->minimum() &&
 +                            latest.voltage <= voltage->maximum()));
 +        const bool wantsSizing = scope->currentIndex() != 1;
-+        const bool hasCircuit = scope->currentIndex() != 0 || selectedWires > 0;
++        const bool hasCircuit = selectedWires > 0;
 +        // Classifying a diagram is independent of the motor current.
 +        // Invalid sizing must never disable classification-only mode.
 +        const bool ok = scope->currentIndex() == 1 ||
@@ -521,11 +517,9 @@ new file mode 100644
 +                .arg(latest.power / 1000., 0, 'f', 3)
 +                .arg(sectionText(latest.sectionMm2))
 +                .arg(latest.dropPercent, 0, 'f', 2)
-+                .arg(scope->currentIndex() == 1 ?
-+                    QObject::tr("Nenhuma seção/tensão será gravada.") :
-+                    scope->currentIndex() == 0 ?
-+                    QObject::tr("Seção/tensão apenas nos potenciais selecionados.") :
-+                    QObject::tr("ATENÇÃO: o cálculo será aplicado a todos os circuitos.")));
++                .arg(QObject::tr(
++                    "Seção/tensão somente nos potenciais selecionados; "
++                    "outras cargas não recebem este dimensionamento.")));
 +    };
 +    QObject::connect(supply, QOverload<int>::of(&QComboBox::currentIndexChanged), &dialog, refresh);
 +    QObject::connect(pair, QOverload<int>::of(&QComboBox::currentIndexChanged), &dialog, refresh);
@@ -538,19 +532,10 @@ new file mode 100644
 +    refresh();
 +    const bool classificationOnly = scope->currentIndex() == 1;
 +    if (!classificationOnly && (!latest.valid || !latest.withinTable)) return;
-+    if (scope->currentIndex() == 2 &&
-+        QMessageBox::warning(parent,
-+            QObject::tr("Dimensionamento global não verificado"),
-+            QObject::tr("Este projeto pode conter cargas, motores e tensões diferentes. "
-+                        "Aplicar a MESMA corrente e seção a todos os circuitos não "
-+                        "é um dimensionamento elétrico seguro. Continuar mesmo assim?"),
-+            QMessageBox::Yes | QMessageBox::No,
-+            QMessageBox::No) != QMessageBox::Yes)
-+        return;
-+    // Index 1 is classification-only; never use circuit sizing there.
-+    const bool allCircuits = scope->currentIndex() == 2;
++    // Without electrical data for every load, global sizing is unsafe.
++    // Index 1 is classification only; other circuits remain untouched.
 +    const Result r = apply(project, latest, overwrite->isChecked(),
-+                           allCircuits, classificationOnly);
++                           classificationOnly);
 +    QMessageBox message(QMessageBox::Information,
 +        classificationOnly ? QObject::tr("Identificação de fios concluída")
 +                           : QObject::tr("Pré-dimensionamento aplicado"),
@@ -615,8 +600,11 @@ new file mode 100644
 +            "Sem função: %4\n"
 +            "Sem tensão/protocolo: %5\n"
 +            "Sem seção E cor: %6\n\n"
-+            "ATENÇÃO: cor e seção são campos distintos. Classificar um fio "
-+            "não dimensiona seu cabo. Abra 'Mostrar detalhes' para conferir "
++            "ATENÇÃO: classe força/comando não identifica automaticamente "
++            "fase L1/L2/L3 nem a tensão efetiva em outro circuito. "
++            "O campo Função pode permanecer vazio por falta de evidência. "
++            "Classificar um fio não dimensiona seu cabo. "
++            "Abra 'Mostrar detalhes' para conferir "
 +            "cada campo armazenado.")
 +            .arg(count).arg(blankSection).arg(blankColor)
 +            .arg(blankFunction).arg(blankVoltage).arg(blankSectionAndColor),
