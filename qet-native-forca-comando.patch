@@ -30,7 +30,7 @@ diff --git a/sources/automation/autowireproperties.h b/sources/automation/autowi
 new file mode 100644
 --- /dev/null
 +++ b/sources/automation/autowireproperties.h
-@@ -0,0 +1,549 @@
+@@ -0,0 +1,596 @@
 +/*
 + * QElectroTech - automatic educational power/control wire properties.
 + * Copyright 2026. Distributed under GPL-2.0-or-later, compatible with QET.
@@ -415,11 +415,22 @@ new file mode 100644
 +    scope->addItem(QObject::tr("Todos os fios do projeto (mesma carga, avançado)"));
 +    if (!selectedWires) scope->setCurrentIndex(1);
 +    form->addRow(QObject::tr("Escopo do cálculo:"), scope);
-+    auto *scopeHelp = new QLabel(QObject::tr(
-+        "Fios selecionados: %1. Para quadros com várias bombas, selecione "
-+        "os condutores de UM circuito antes de calcular. A identificação "
-+        "de força/comando/PE continuará procurando no projeto inteiro.")
-+        .arg(selectedWires));
++    auto *scopeHelp = new QLabel(&dialog);
++    auto updateScopeHelp = [&]() {
++        if (scope->currentIndex() == 1)
++            scopeHelp->setText(QObject::tr(
++                "MODO IDENTIFICAÇÃO: não dimensiona NENHUM fio. "
++                "Seções e tensões continuarão vazias se não tiverem sido informadas."));
++        else if (scope->currentIndex() == 0)
++            scopeHelp->setText(QObject::tr(
++                "Fios selecionados: %1. Selecione todas as fases do mesmo circuito "
++                "ANTES de abrir a janela. Nenhum outro circuito receberá esta seção.")
++                .arg(selectedWires));
++        else
++            scopeHelp->setText(QObject::tr(
++                "ATENÇÃO: o valor informado será aplicado a todos os circuitos "
++                "identificados. Não use esta opção em quadros com cargas diferentes."));
++    };
 +    scopeHelp->setWordWrap(true);
 +    layout->addWidget(scopeHelp);
 +    auto *overwrite = new QCheckBox(QObject::tr(
@@ -444,9 +455,19 @@ new file mode 100644
 +    QetWirePrecalc::Output latest;
 +    auto refresh = [&]() {
 +        const int known = pair->currentIndex();
-+        voltage->setEnabled(known != 2);
-+        current->setEnabled(known != 1);
-+        power->setEnabled(known != 0);
++        const bool onlyIdentify = scope->currentIndex() == 1;
++        // The old dialog accepted electrical inputs while ignoring them:
++        // disable them visibly in classification-only mode.
++        updateScopeHelp();
++        supply->setEnabled(!onlyIdentify);
++        pair->setEnabled(!onlyIdentify);
++        voltage->setEnabled(!onlyIdentify && known != 2);
++        current->setEnabled(!onlyIdentify && known != 1);
++        power->setEnabled(!onlyIdentify && known != 0);
++        pf->setEnabled(!onlyIdentify);
++        length->setEnabled(!onlyIdentify);
++        drop->setEnabled(!onlyIdentify);
++        overwrite->setEnabled(!onlyIdentify);
 +        QetWirePrecalc::Input input;
 +        input.supply = supply->currentIndex() == 1 ?
 +            QetWirePrecalc::Supply::ThreePhase : QetWirePrecalc::Supply::TwoWire;
@@ -485,8 +506,9 @@ new file mode 100644
 +        buttons->button(QDialogButtonBox::Ok)->setEnabled(ok);
 +        if (scope->currentIndex() == 1)
 +            preview->setText(QObject::tr(
-+                "Somente identificar categorias, funções e cores técnicas. "
-+                "Não utiliza V/I/P nem dimensiona seções ou tensões."));
++                "IDENTIFICAÇÃO APENAS: os valores de tensão, corrente e potência "
++                "NÃO SERÃO USADOS. Para calcular seção, cancele, selecione "
++                "os fios do circuito no desenho e reabra esta ferramenta."));
 +        else if (!latest.valid) preview->setText(QObject::tr("Valores inválidos."));
 +        else if (!latest.withinTable)
 +            preview->setText(QObject::tr("Corrente ou queda de tensão fora da tabela preliminar até 120 mm²."));
@@ -529,7 +551,9 @@ new file mode 100644
 +    const bool allCircuits = scope->currentIndex() == 2;
 +    const Result r = apply(project, latest, overwrite->isChecked(),
 +                           allCircuits, classificationOnly);
-+    QMessageBox message(QMessageBox::Information, QObject::tr("Pré-dimensionamento aplicado"),
++    QMessageBox message(QMessageBox::Information,
++        classificationOnly ? QObject::tr("Identificação de fios concluída")
++                           : QObject::tr("Pré-dimensionamento aplicado"),
 +        QObject::tr("Seção de força sugerida: %1\n"
 +                    "Força: %2 | Comando: %3 | Neutro: %4 | PE: %5\n"
 +                    "Não classificados: %6 | Atualizados: %7 | Sem alteração: %8\n"
@@ -555,25 +579,48 @@ new file mode 100644
 +    if (!project) return;
 +    QStringList lines;
 +    int count = 0;
-+    int blank = 0;
++    int blankSection = 0;
++    int blankColor = 0;
++    int blankFunction = 0;
++    int blankVoltage = 0;
++    int blankSectionAndColor = 0;
 +    for (Diagram *d : project->diagrams()) {
 +        if (!d) continue;
 +        for (Conductor *c : DiagramContent(d, false).conductors()) {
 +            if (!c) continue;
 +            ++count;
 +            const ConductorProperties p = c->properties();
-+            if (p.m_wire_section.isEmpty() && p.m_wire_color.isEmpty()) ++blank;
++            const bool noSection = p.m_wire_section.trimmed().isEmpty();
++            const bool noColor = p.m_wire_color.trimmed().isEmpty();
++            const bool noFunction = p.m_function.trimmed().isEmpty();
++            const bool noVoltage = p.m_tension_protocol.trimmed().isEmpty();
++            if (noSection) ++blankSection;
++            if (noColor) ++blankColor;
++            if (noFunction) ++blankFunction;
++            if (noVoltage) ++blankVoltage;
++            if (noSection && noColor) ++blankSectionAndColor;
 +            lines << QObject::tr("Fio %1 | Seção: %2 | Cor: %3 | Função: %4 | Tensão: %5")
 +                .arg(c->uuid().toString(QUuid::WithoutBraces).left(8),
-+                     p.m_wire_section.isEmpty() ? QObject::tr("(vazia)") : p.m_wire_section,
-+                     p.m_wire_color.isEmpty() ? QObject::tr("(vazia)") : p.m_wire_color,
-+                     p.m_function.isEmpty() ? QObject::tr("(vazia)") : p.m_function,
-+                     p.m_tension_protocol.isEmpty() ? QObject::tr("(vazia)") : p.m_tension_protocol);
++                     noSection ? QObject::tr("(vazia)") : p.m_wire_section,
++                     noColor ? QObject::tr("(vazia)") : p.m_wire_color,
++                     noFunction ? QObject::tr("(vazia)") : p.m_function,
++                     noVoltage ? QObject::tr("(vazia)") : p.m_tension_protocol);
 +        }
 +    }
 +    QMessageBox box(QMessageBox::Information, QObject::tr("Características dos fios"),
-+        QObject::tr("Total: %1\nSem seção e cor: %2\n\nAbra 'Mostrar detalhes' para conferir os valores armazenados no projeto.")
-+            .arg(count).arg(blank), QMessageBox::Ok, parent);
++        QObject::tr(
++            "Total de fios: %1\n"
++            "Sem seção: %2\n"
++            "Sem cor técnica: %3\n"
++            "Sem função: %4\n"
++            "Sem tensão/protocolo: %5\n"
++            "Sem seção E cor: %6\n\n"
++            "ATENÇÃO: cor e seção são campos distintos. Classificar um fio "
++            "não dimensiona seu cabo. Abra 'Mostrar detalhes' para conferir "
++            "cada campo armazenado.")
++            .arg(count).arg(blankSection).arg(blankColor)
++            .arg(blankFunction).arg(blankVoltage).arg(blankSectionAndColor),
++        QMessageBox::Ok, parent);
 +    box.setDetailedText(lines.join(QStringLiteral("\n")));
 +    box.exec();
 +}
