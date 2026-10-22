@@ -38,7 +38,7 @@ diff --git a/sources/automation/autowireproperties.h b/sources/automation/autowi
 new file mode 100644
 --- /dev/null
 +++ b/sources/automation/autowireproperties.h
-@@ -0,0 +1,731 @@
+@@ -0,0 +1,734 @@
 +/*
 + * QElectroTech - automatic educational power/control wire properties.
 + * Copyright 2026. Distributed under GPL-2.0-or-later, compatible with QET.
@@ -415,13 +415,16 @@ new file mode 100644
 +    auto *traceSummary = new QLabel(QObject::tr(
 +        "RASTREAMENTO PRÉVIO: %1 páginas, %2 elementos, %3 terminais, "
 +        "%4 fios, %5 potenciais (%6 atravessando páginas). "
-+        "Conexões: %7. Consulte Editar → Rastrear conexões elétricas "
-+        "do projeto para ver todos os elementos e terminais.")
++        "Integridade dos fios: %7. Setas problemáticas: %8. "
++        "Potenciais bloqueados: %9. "
++        "Consulte Editar → Rastrear conexões elétricas do projeto.")
 +        .arg(preflight.folios).arg(preflight.elements)
 +        .arg(preflight.terminals).arg(preflight.wires)
 +        .arg(preflight.groups.size()).arg(preflight.multiFolioPotentials)
-+        .arg(preflight.complete ? QObject::tr("verificadas") :
-+                                 QObject::tr("há problemas; apenas potenciais afetados bloqueados")));
++        .arg(preflight.complete ? QObject::tr("cobertura completa") :
++                                 QObject::tr("há fios/terminais sem rastreio"))
++        .arg(preflight.unmatchedReports)
++        .arg(preflight.unsafeGroups.size()));
 +    traceSummary->setWordWrap(true);
 +    layout->addWidget(traceSummary);
 +    auto *form = new QFormLayout;
