@@ -68,6 +68,7 @@ struct Snapshot {
     int unsupportedMultiTerminal = 0;
     QList<DevicePassage> passages;
     QList<ReportHop> reportHops;
+    QSet<int> unsafeGroups; // broken folio links / missing wire endpoints
     QList<PotentialGroup> groups;
     QHash<Conductor *,int> groupByConductor;
     QStringList elementInventory;
@@ -75,6 +76,10 @@ struct Snapshot {
     QStringList folioInventory;
     QStringList warnings;
     bool complete = false;
+    bool canSizeGroup(int id) const {
+        return id>=0 && id<groups.size() && !unsafeGroups.contains(id) &&
+               !groups.at(id).hasUnconnectedEndpoint;
+    }
     // 'complete' refers to topology index coverage, not certified electric design.
     QString pathReport(int start) const {
         QStringList out;
@@ -162,6 +167,8 @@ struct Snapshot {
                    .arg(elementsLinkingPotentials);
         out << QStringLiteral("Passagens por dispositivos: %1 | Setas vinculadas: %2 | Setas sem par: %3")
                    .arg(passages.size()).arg(reportHops.size()).arg(unmatchedReports);
+        out << QStringLiteral("Potenciais com conexão inconsistente: %1")
+                   .arg(unsafeGroups.size());
         out << QStringLiteral("Terminais sem fio: %1 | Ligações com terminal inválido: %2")
                    .arg(openTerminals).arg(invalidEndpoints);
         out << QStringLiteral("Cobertura do grafo: %1")
@@ -423,6 +430,7 @@ inline Snapshot scan(QETProject *project) {
         group.declaredData.removeDuplicates();
         group.declaredData.sort();
         if (group.spansFolios()) ++snap.multiFolioPotentials;
+        if(group.hasUnconnectedEndpoint) snap.unsafeGroups.insert(groupId);
         snap.groups << group;
     }
     // Build the second layer: which electrically distinct potentials touch
@@ -478,6 +486,10 @@ inline Snapshot scan(QETProject *project) {
                 if(partners.isEmpty()) {
                     if(!e->conductors().isEmpty()) {
                         ++snap.unmatchedReports;
+                        for(Terminal *pin:pins) {
+                            const int affected=groupAtTerminal(snap,pin);
+                            if(affected>=0) snap.unsafeGroups.insert(affected);
+                        }
                         snap.warnings << QStringLiteral(
                             "SETA SEM VÍNCULO: pág.%1 %2 (%3)")
                             .arg(folio->folioIndex()+1)
@@ -512,6 +524,8 @@ inline Snapshot scan(QETProject *project) {
                             .arg(hop.source,hop.destination)
                             .arg(from+1).arg(dest+1);
                         ++snap.unmatchedReports;
+                        snap.unsafeGroups.insert(from);
+                        snap.unsafeGroups.insert(dest);
                     }
                 }
                 continue;
@@ -577,8 +591,8 @@ inline Snapshot scan(QETProject *project) {
                    snap.groupByConductor.size()==available.size());
     if (!snap.complete)
         snap.warnings << QStringLiteral(
-            "INCONSISTÊNCIA: existem fios sem rastreamento, terminais inválidos "
-            "ou setas sem vínculo; o pré-dimensionamento permanece bloqueado.");
+            "INCONSISTÊNCIA: há setas ou extremidades sem ligação. "
+            "Somente os potenciais afetados são bloqueados para dimensionamento.");
     if (snap.openTerminals)
         snap.warnings << QStringLiteral(
             "OBSERVAÇÃO: terminais livres podem ser intencionais, mas precisam de revisão.");
