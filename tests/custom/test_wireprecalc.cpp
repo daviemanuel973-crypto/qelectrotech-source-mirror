@@ -20,5 +20,14 @@ int main() {
     q.current=10.;q.lengthMeters=-1.;a=calculate(q);assert(!a.valid);
     q.lengthMeters=0.;a=calculate(q);assert(!a.valid);
     q.lengthMeters=0.01;a=calculate(q);assert(a.valid);
+    // 24 V DC is not AC: 24 V x 10 A = 240 W regardless of cos(phi).
+    q.supply=Supply::DC;q.known=KnownPair::VoltageCurrent;
+    q.voltage=24.;q.current=10.;q.powerFactor=.5;q.lengthMeters=5.;
+    a=calculate(q);assert(a.valid && a.withinTable && near(a.power,240.));
+    q.known=KnownPair::VoltagePower;q.power=240.;a=calculate(q);
+    assert(a.valid && near(a.current,10.));
+    q.known=KnownPair::CurrentPower;q.current=10.;a=calculate(q);
+    assert(a.valid && near(a.voltage,24.));
+    q.powerFactor=0.;a=calculate(q);assert(a.valid && near(a.voltage,24.));
     std::cout<<"Testes do dimensionamento: OK\n";
 }
