@@ -5,7 +5,7 @@
 #include <array>
 namespace QetWirePrecalc {
 enum class KnownPair { VoltageCurrent, VoltagePower, CurrentPower };
-enum class Supply { TwoWire, ThreePhase };
+enum class Supply { TwoWire, ThreePhase, DC };
 struct Input {
     KnownPair known = KnownPair::VoltageCurrent;
     Supply supply = Supply::ThreePhase;
@@ -25,22 +25,25 @@ struct Output {
 inline Output calculate(const Input &p) {
     Output o;
     const double factor = p.supply == Supply::ThreePhase ? std::sqrt(3.0) : 1.0;
-    if (!(std::isfinite(p.powerFactor) && p.powerFactor > 0. && p.powerFactor <= 1.
+    // DC circuits have no displacement power factor. Never apply cos(phi)
+    // to a 24 VDC supply output; the provided PF is ignored for DC.
+    const double pf = p.supply == Supply::DC ? 1.0 : p.powerFactor;
+    if (!(std::isfinite(pf) && pf > 0. && pf <= 1.
           && std::isfinite(p.lengthMeters) && p.lengthMeters > 0.
           && std::isfinite(p.maxDropPercent) && p.maxDropPercent > 0. && p.maxDropPercent <= 15.))
         return o;
     switch (p.known) {
     case KnownPair::VoltageCurrent:
         o.voltage = p.voltage; o.current = p.current;
-        o.power = factor * o.voltage * o.current * p.powerFactor;
+        o.power = factor * o.voltage * o.current * pf;
         break;
     case KnownPair::VoltagePower:
         o.voltage = p.voltage; o.power = p.power;
-        o.current = o.power / (factor * o.voltage * p.powerFactor);
+        o.current = o.power / (factor * o.voltage * pf);
         break;
     case KnownPair::CurrentPower:
         o.current = p.current; o.power = p.power;
-        o.voltage = o.power / (factor * o.current * p.powerFactor);
+        o.voltage = o.power / (factor * o.current * pf);
         break;
     }
     if (!(std::isfinite(o.voltage) && std::isfinite(o.current) && std::isfinite(o.power)
@@ -58,7 +61,7 @@ inline Output calculate(const Input &p) {
     for (unsigned i = 0; i < sections.size(); ++i) {
         const double section = sections[i];
         const double dropV = (p.supply == Supply::ThreePhase ? std::sqrt(3.0) : 2.0)
-                           * rhoCopperHot * p.lengthMeters * o.current * p.powerFactor / section;
+                           * rhoCopperHot * p.lengthMeters * o.current * pf / section;
         const double pct = 100. * dropV / o.voltage;
         if (o.current <= limit[i] && pct <= p.maxDropPercent) {
             o.sectionMm2 = section;
