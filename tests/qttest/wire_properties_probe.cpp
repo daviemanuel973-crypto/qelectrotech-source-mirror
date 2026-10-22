@@ -211,15 +211,19 @@ int main(int argc, char **argv) {
         // No external GUI automation or manual installation is needed.
         bool sawDialog=false, sawResult=false, sawGlobalWarning=false,
              dialogTimedOut=false;
+        int dialogPolls=0;
+        QStringList guiHistory;
         QTimer poll;
         poll.setInterval(20);
         QObject::connect(&poll, &QTimer::timeout, &app, [&]() {
+            ++dialogPolls;
             for (QWidget *window : QApplication::topLevelWidgets()) {
                 if (!window->isVisible()) continue;
                 if (auto *d=qobject_cast<QDialog*>(window)) {
                     if (d->windowTitle().contains(QStringLiteral("Dimensionamento preliminar"))) {
                         if (sawDialog) continue;
                         sawDialog=true;
+                        guiHistory << QStringLiteral("found-input-dialog");
                         const auto combos=d->findChildren<QComboBox*>();
                         const auto fields=d->findChildren<QDoubleSpinBox*>();
                         require(combos.size()==3,"supply, pair and safe sizing scope shown");
@@ -254,16 +258,21 @@ int main(int argc, char **argv) {
                             if (label->text().contains(QStringLiteral("Resultado:")))
                                 previewFound=true;
                         require(previewFound,"live calculation displayed");
+                        guiHistory << QStringLiteral("click-OK enabled=%1 scope=%2")
+                            .arg(buttons->button(QDialogButtonBox::Ok)->isEnabled())
+                            .arg(combos.at(2)->currentIndex());
                         buttons->button(QDialogButtonBox::Ok)->click();
                     }
                 }
                 if (auto *message=qobject_cast<QMessageBox*>(window)) {
                     if (message->windowTitle().contains(QStringLiteral("Dimensionamento global não verificado"))) {
                         sawGlobalWarning=true;
+                        guiHistory << QStringLiteral("global-safety-warning");
                         message->done(QMessageBox::Yes);
                     }
                     if (message->windowTitle().contains(QStringLiteral("Pré-dimensionamento aplicado"))) {
                         sawResult=true;
+                        guiHistory << QStringLiteral("result-dialog");
                         message->accept();
                     }
                 }
@@ -273,15 +282,23 @@ int main(int argc, char **argv) {
         watchdog.setSingleShot(true);
         QObject::connect(&watchdog, &QTimer::timeout, &app, [&]() {
             dialogTimedOut=true;
+            guiHistory << QStringLiteral("watchdog-fired");
             for (QWidget *window : QApplication::topLevelWidgets())
                 if (auto *d=qobject_cast<QDialog*>(window))
                     if (d->isVisible()) d->reject();
         });
         poll.start();
-        watchdog.start(10000);
+        // A large fixture may need extra time to classify 671 conductor
+        // potentials before opening the completion dialog on Windows CI.
+        watchdog.start(45000);
         AutoWireProperties::run(nullptr, &reopened);
         poll.stop();
         watchdog.stop();
+        std::printf("GUI trace: sawDialog=%d, warning=%d, result=%d, timedOut=%d, polls=%d, events=%s\n",
+            int(sawDialog),int(sawGlobalWarning),int(sawResult),
+            int(dialogTimedOut),dialogPolls,
+            qPrintable(guiHistory.join(QStringLiteral(";"))));
+        std::fflush(stdout);
         require(!dialogTimedOut && sawDialog && sawResult && sawGlobalWarning,
                 "Qt inputs, advanced scope warning and completion succeeded");
         std::printf("PASS QET Qt dialog: voltage+power pair, preview, apply, confirmation\n");
