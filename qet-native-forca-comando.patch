@@ -30,7 +30,7 @@ diff --git a/sources/automation/autowireproperties.h b/sources/automation/autowi
 new file mode 100644
 --- /dev/null
 +++ b/sources/automation/autowireproperties.h
-@@ -0,0 +1,584 @@
+@@ -0,0 +1,588 @@
 +/*
 + * QElectroTech - automatic educational power/control wire properties.
 + * Copyright 2026. Distributed under GPL-2.0-or-later, compatible with QET.
@@ -369,8 +369,9 @@ new file mode 100644
 +    auto *form = new QFormLayout;
 +    layout->addLayout(form);
 +    auto *supply = new QComboBox;
-+    supply->addItems({QObject::tr("Dois fios (tensão entre condutores)"),
-+                      QObject::tr("Trifásico equilibrado (tensão entre fases)")});
++    supply->addItems({QObject::tr("CA monofásico / dois fios"),
++                      QObject::tr("CA trifásico equilibrado (tensão entre fases)"),
++                      QObject::tr("CC dois fios (ex.: 24 Vcc)")});
 +    supply->setCurrentIndex(1);
 +    auto *pair = new QComboBox;
 +    pair->addItems({QObject::tr("Conheço tensão e corrente"),
@@ -440,7 +441,7 @@ new file mode 100644
 +        "sem agrupamento. Não verifica proteção, partida de motor ou todas as "
 +        "exigências da NBR 5410. PE não recebe bitola automática. "
 +        "Para potência mecânica de placa de motor, é necessário considerar "
-+        "o rendimento (η)."));
++        "o rendimento (η). Em CC o fator de potência é ignorado."));
 +    note->setWordWrap(true);
 +    layout->addWidget(note);
 +    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
@@ -460,13 +461,14 @@ new file mode 100644
 +        voltage->setEnabled(!onlyIdentify && known != 2);
 +        current->setEnabled(!onlyIdentify && known != 1);
 +        power->setEnabled(!onlyIdentify && known != 0);
-+        pf->setEnabled(!onlyIdentify);
++        pf->setEnabled(!onlyIdentify && supply->currentIndex() != 2);
 +        length->setEnabled(!onlyIdentify);
 +        drop->setEnabled(!onlyIdentify);
 +        overwrite->setEnabled(!onlyIdentify);
 +        QetWirePrecalc::Input input;
-+        input.supply = supply->currentIndex() == 1 ?
-+            QetWirePrecalc::Supply::ThreePhase : QetWirePrecalc::Supply::TwoWire;
++        input.supply = supply->currentIndex() == 2 ? QetWirePrecalc::Supply::DC :
++                       supply->currentIndex() == 1 ? QetWirePrecalc::Supply::ThreePhase :
++                                                     QetWirePrecalc::Supply::TwoWire;
 +        input.known = known == 0 ? QetWirePrecalc::KnownPair::VoltageCurrent :
 +                      known == 1 ? QetWirePrecalc::KnownPair::VoltagePower :
 +                                   QetWirePrecalc::KnownPair::CurrentPower;
@@ -517,9 +519,11 @@ new file mode 100644
 +                .arg(latest.power / 1000., 0, 'f', 3)
 +                .arg(sectionText(latest.sectionMm2))
 +                .arg(latest.dropPercent, 0, 'f', 2)
-+                .arg(QObject::tr(
-+                    "Seção/tensão somente nos potenciais selecionados; "
-+                    "outras cargas não recebem este dimensionamento.")));
++                .arg(supply->currentIndex() == 2
++                    ? QObject::tr("CC: cos φ não é aplicado. Seção/tensão somente nos fios selecionados.")
++                    : QObject::tr(
++                        "Seção/tensão somente nos potenciais selecionados; "
++                        "outras cargas não recebem este dimensionamento.")));
 +    };
 +    QObject::connect(supply, QOverload<int>::of(&QComboBox::currentIndexChanged), &dialog, refresh);
 +    QObject::connect(pair, QOverload<int>::of(&QComboBox::currentIndexChanged), &dialog, refresh);
