@@ -299,14 +299,6 @@ inline QList<QPair<QString,QString>> namedPairs() {
 inline QString deviceBehaviour(const Element *element,const QString &pa,
                                const QString &pb) {
     const QString n=element ? element->name().toLower() : QString();
-    if((pa==QStringLiteral("A1") && pb==QStringLiteral("A2")) ||
-       n.contains(QStringLiteral("bobina")) ||
-       n.contains(QStringLiteral("coil")) ||
-       n.contains(QStringLiteral("motor")) ||
-       n.contains(QStringLiteral("lamp")) ||
-       n.contains(QStringLiteral("lâmpada")) ||
-       n.contains(QStringLiteral("resistor")))
-        return QStringLiteral("CARGA: entrada/saída do dispositivo, não continuidade de fio");
     if(n.contains(QStringLiteral("transform")) ||
        n.contains(QStringLiteral("alimentação")) ||
        n.contains(QStringLiteral("power supply")) ||
@@ -323,8 +315,18 @@ inline QString deviceBehaviour(const Element *element,const QString &pa,
        n.contains(QStringLiteral("relay")) ||
        n.contains(QStringLiteral("relé")) ||
        n.contains(QStringLiteral("selector")) ||
-       n.contains(QStringLiteral("switch")))
+       n.contains(QStringLiteral("switch")) ||
+       n.contains(QStringLiteral("contator")) ||
+       n.contains(QStringLiteral("contactor")))
         return QStringLiteral("MANOBRA/PROTEÇÃO: estado do contato não verificado");
+    if((pa==QStringLiteral("A1") && pb==QStringLiteral("A2")) ||
+       n.contains(QStringLiteral("bobina")) ||
+       n.contains(QStringLiteral("coil")) ||
+       n.contains(QStringLiteral("motor")) ||
+       n.contains(QStringLiteral("lamp")) ||
+       n.contains(QStringLiteral("lâmpada")) ||
+       n.contains(QStringLiteral("resistor")))
+        return QStringLiteral("CARGA: entrada/saída do dispositivo, não continuidade de fio");
     return QStringLiteral("DISPOSITIVO: conexão interna não verificada");
 }
 
@@ -508,6 +510,24 @@ inline Snapshot scan(QETProject *project) {
                     const int dest=peerPins.isEmpty() ? -1 :
                                    groupAtTerminal(snap,peerPins.first());
                     if(from<0 || dest<0) continue;
+                    const bool nextToPrev =
+                        ((e->linkType() & Element::NextReport) &&
+                         (other->linkType() & Element::PreviousReport)) ||
+                        ((e->linkType() & Element::PreviousReport) &&
+                         (other->linkType() & Element::NextReport));
+                    if(!nextToPrev) {
+                        ++snap.unmatchedReports;
+                        snap.unsafeGroups.insert(from);
+                        snap.unsafeGroups.insert(dest);
+                        snap.warnings << QStringLiteral(
+                            "SETAS INCOMPATÍVEIS: %1 (pág.%2) e %3 (pág.%4) "
+                            "não são um par PreviousReport/NextReport.")
+                            .arg(safeText(e->actualLabel()))
+                            .arg(folio->folioIndex()+1)
+                            .arg(safeText(other->actualLabel()))
+                            .arg(other->diagram() ? other->diagram()->folioIndex()+1 : -1);
+                        continue;
+                    }
                     ReportHop hop;
                     hop.a=from;hop.b=dest;
                     hop.source=safeText(e->actualLabel());
@@ -563,7 +583,7 @@ inline Snapshot scan(QETProject *project) {
                 if(!a || !b || a==b) continue;
                 // Don't pair a bare '1/2' if a more specific name also
                 // identifies these pins; each pair represents one port path.
-                const QString key=shortUuid(a->uuid())+shortUuid(b->uuid());
+                const QString key=a->uuid().toString()+b->uuid().toString();
                 if(usedPairs.contains(key)) continue;
                 usedPairs.insert(key);
                 ++identifiedPairs;
