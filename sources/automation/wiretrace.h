@@ -164,6 +164,12 @@ inline Snapshot scan(QETProject *project) {
                 .arg(safeText(e->name()))
                 .arg(terminals.size())
                 .arg(open);
+            for (Terminal *t : terminals) {
+                if (!t) { snap.warnings << QStringLiteral("Elemento com terminal nulo."); continue; }
+                snap.elementInventory << QStringLiteral("  borne %1 | id %2 | %3 fio(s)")
+                    .arg(safeText(t->name()),shortUuid(t->uuid()))
+                    .arg(t->conductorsCount());
+            }
         }
         for (Conductor *c : conductors) {
             if (!c) continue;
@@ -173,6 +179,10 @@ inline Snapshot scan(QETProject *project) {
                 ++snap.invalidEndpoints;
         }
     }
+    // Stable grouping/order is essential when comparing trace reports.
+    std::sort(allWires.begin(),allWires.end(),[](Conductor *a,Conductor *b){
+        return a->uuid().toString()<b->uuid().toString();
+    });
     QSet<Conductor *> visited;
     for (Conductor *leader : std::as_const(allWires)) {
         if (!leader || visited.contains(leader)) continue;
@@ -189,7 +199,10 @@ inline Snapshot scan(QETProject *project) {
             visited.insert(c);
             snap.groupByConductor.insert(c,groupId);
             group.conductors << c;
-            group.folios.insert(c->diagram());
+            if (c->diagram()) group.folios.insert(c->diagram());
+            else { group.hasUnconnectedEndpoint=true; snap.warnings <<
+                       QStringLiteral("Condutor sem página associada: %1")
+                           .arg(shortUuid(c->uuid())); }
             group.wireIds << shortUuid(c->uuid());
             for (Terminal *t : {c->terminal1,c->terminal2}) {
                 if (!t) {
