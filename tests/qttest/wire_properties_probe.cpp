@@ -268,7 +268,17 @@ int main(int argc, char **argv) {
                     if (message->windowTitle().contains(QStringLiteral("Dimensionamento global não verificado"))) {
                         sawGlobalWarning=true;
                         guiHistory << QStringLiteral("global-safety-warning");
-                        message->done(QMessageBox::Yes);
+                        // QMessageBox::warning() maps the *clicked standard
+                        // button*, not just the QDialog::done() result.
+                        // done(Yes) closes the box but can return NoButton,
+                        // causing the application to cancel the operation.
+                        if (QAbstractButton *yes = message->button(QMessageBox::Yes)) {
+                            guiHistory << QStringLiteral("clicked-actual-Yes-button");
+                            yes->click();
+                        } else {
+                            guiHistory << QStringLiteral("ERROR-No-Yes-button");
+                            message->reject();
+                        }
                     }
                     if (message->windowTitle().contains(QStringLiteral("Pré-dimensionamento aplicado"))) {
                         sawResult=true;
