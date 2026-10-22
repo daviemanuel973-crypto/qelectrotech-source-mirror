@@ -38,7 +38,7 @@ diff --git a/sources/automation/autowireproperties.h b/sources/automation/autowi
 new file mode 100644
 --- /dev/null
 +++ b/sources/automation/autowireproperties.h
-@@ -0,0 +1,706 @@
+@@ -0,0 +1,731 @@
 +/*
 + * QElectroTech - automatic educational power/control wire properties.
 + * Copyright 2026. Distributed under GPL-2.0-or-later, compatible with QET.
@@ -270,8 +270,7 @@ new file mode 100644
 +    result.tracedElements = trace.elements;
 +    result.tracedTerminals = trace.terminals;
 +    result.tracedPotentials = trace.groups.size();
-+    result.traceComplete = trace.complete;
-+    if (!classificationOnly && !trace.complete) return result;
++    result.traceComplete = true; // Rechecked per selected potential below.
 +    result.proposedPowerSection = sizing.sectionMm2;
 +    auto *batch = new QUndoCommand(QObject::tr("Preencher propriedades de condutores (perfil didático)"));
 +    QList<QPair<Conductor *, ConductorProperties>> expected;
@@ -312,6 +311,17 @@ new file mode 100644
 +        }
 +    }
 +    selectedCircuit.intersect(available);
++    if(!classificationOnly) {
++        if(selectedCircuit.isEmpty()) result.traceComplete=false;
++        for(Conductor *wire:selectedCircuit) {
++            const int id=trace.groupByConductor.value(wire,-1);
++            if(!trace.canSizeGroup(id)) {
++                result.traceComplete=false;
++                break;
++            }
++        }
++        if(!result.traceComplete) return result;
++    }
 +    // A single motor load NEVER represents the whole panel. Global
 +    // sizing has been removed: only explicitly selected potentials may
 +    // receive a preliminary conductor section or voltage.
@@ -411,7 +421,7 @@ new file mode 100644
 +        .arg(preflight.terminals).arg(preflight.wires)
 +        .arg(preflight.groups.size()).arg(preflight.multiFolioPotentials)
 +        .arg(preflight.complete ? QObject::tr("verificadas") :
-+                                 QObject::tr("INCOMPLETAS, bitolas bloqueadas")));
++                                 QObject::tr("há problemas; apenas potenciais afetados bloqueados")));
 +    traceSummary->setWordWrap(true);
 +    layout->addWidget(traceSummary);
 +    auto *form = new QFormLayout;
@@ -550,10 +560,22 @@ new file mode 100644
 +                            latest.voltage <= voltage->maximum()));
 +        const bool wantsSizing = scope->currentIndex() != 1;
 +        const bool hasCircuit = selectedWires > 0 || !chosenPotentials.isEmpty();
++        QSet<int> sizingGroups=chosenPotentials;
++        if(sizingGroups.isEmpty()) {
++            for(const WireTrace::PotentialGroup &group:preflight.groups)
++                for(Conductor *wire:group.conductors)
++                    if(wire && wire->isSelected()) {
++                        sizingGroups.insert(preflight.groupByConductor.value(wire,-1));
++                        break;
++                    }
++        }
++        bool selectedTraceSafe=hasCircuit;
++        for(int id:sizingGroups)
++            if(!preflight.canSizeGroup(id)) selectedTraceSafe=false;
 +        // Classifying a diagram is independent of the motor current.
 +        // Invalid sizing must never disable classification-only mode.
 +        const bool ok = scope->currentIndex() == 1 ||
-+                        (preflight.complete && latest.valid &&
++                        (selectedTraceSafe && latest.valid &&
 +                         latest.withinTable && outputFits &&
 +                         (!wantsSizing || hasCircuit));
 +        buttons->button(QDialogButtonBox::Ok)->setEnabled(ok);
@@ -562,8 +584,10 @@ new file mode 100644
 +                "IDENTIFICAÇÃO APENAS: os valores de tensão, corrente e potência "
 +                "NÃO SERÃO USADOS. Use o seletor de potenciais rastreados "
 +                "para dimensionar sem caçar fios manualmente no desenho."));
-+        else if (!preflight.complete)
-+            preview->setText(QObject::tr("Rastreamento incompleto: dimensionamento bloqueado."));
++        else if(!selectedTraceSafe)
++            preview->setText(QObject::tr(
++                "Nenhum potencial seguro selecionado, ou a seleção contém "
++                "uma ligação inconsistente entre fios/setas. Confira o rastreamento."));
 +        else if (!latest.valid) preview->setText(QObject::tr("Valores inválidos."));
 +        else if (!latest.withinTable)
 +            preview->setText(QObject::tr("Corrente ou queda de tensão fora da tabela preliminar até 120 mm²."));
@@ -658,8 +682,9 @@ new file mode 100644
 +                           classificationOnly, chosenPotentials);
 +    if (!r.traceComplete && !classificationOnly) {
 +        QMessageBox::warning(parent, QObject::tr("Rastreamento incompleto"),
-+            QObject::tr("Não foi possível percorrer todos os fios/terminais. "
-+                        "O dimensionamento foi bloqueado. Confira Editar → "
++            QObject::tr("O potencial escolhido contém ligação inválida ou "
++                        "seta sem par. Este circuito foi bloqueado; os demais "
++                        "continuam disponíveis. Confira Editar → "
 +                        "Rastrear conexões elétricas do projeto."));
 +        return;
 +    }
