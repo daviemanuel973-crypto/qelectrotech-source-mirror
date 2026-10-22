@@ -69,7 +69,19 @@ int main(int argc, char **argv) {
         // Audit all QET folios/symbols/terminals/conductors BEFORE any
         // sizing or mutation. Every wire must map to exactly one potential.
         const auto topology=WireTrace::scan(&project);
-        require(topology.complete,"graph scan is complete");
+        require(topology.complete,"every conductor and terminal endpoint is indexed");
+        // Broken cross-folio arrow links do NOT invalidate the whole
+        // project's wire inventory; only their potentials are unsafe.
+        require(topology.groupByConductor.size()==wires.size(),
+                "locally unmatched arrows cannot hide unrelated wires");
+        for (int id : topology.unsafeGroups)
+            require(!topology.canSizeGroup(id),
+                    "an unresolved connection blocks its own potential");
+        for (const auto &hop : topology.reportHops) {
+            require(hop.a>=0 && hop.a<topology.groups.size() &&
+                    hop.b>=0 && hop.b<topology.groups.size(),
+                    "cross-page continuation refers to existing potentials");
+        }
         require(topology.folios==project.diagrams().size(),"all folios traversed");
         require(topology.wires==wires.size(),"every conductor was traced");
         require(topology.elements>0 && topology.terminals>0 && !topology.groups.isEmpty(),
@@ -101,6 +113,11 @@ int main(int argc, char **argv) {
         require(groupWires==wires.size(),"no wire lost or counted twice");
         require(topology.report().contains(QStringLiteral("Nenhum dimensionamento")),
                 "audit explicitly reports that no sizing occurred");
+        require(topology.routeBetween(0,0).contains(QStringLiteral("MESMO potencial")),
+                "route engine recognizes identical electrical potentials");
+        if(topology.groups.size()>1)
+            require(topology.routeBetween(0,1).contains(QStringLiteral("ROTA ENTRE POTENCIAIS")),
+                    "route engine reports cross-device/cross-page route or missing passage");
         for (Conductor *c:wires)
             require(c->properties()==old.value(c),"trace must never edit conductor properties");
 
