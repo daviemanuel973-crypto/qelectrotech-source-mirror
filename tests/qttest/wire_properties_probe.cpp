@@ -166,6 +166,11 @@ int main(int argc, char **argv) {
         for (Conductor *candidate : wires) {
             if (AutoWireProperties::classify(candidate)!=AutoWireProperties::Role::Power)
                 continue;
+            // The fixture contains old, unpaired folio reports; the test
+            // must select a power potential that is electrically eligible,
+            // not a deliberately blocked branch.
+            if (!topology.canSizeGroup(topology.groupByConductor.value(candidate,-1)))
+                continue;
             auto potential=candidate->relatedPotentialConductors(true);
             potential.insert(candidate);
             bool conflicting=false;
@@ -177,7 +182,7 @@ int main(int argc, char **argv) {
             }
             if (!conflicting) { selectedPower=candidate; break; }
         }
-        require(selectedPower!=nullptr,"fixture contains a recognized power conductor");
+        require(selectedPower!=nullptr,"fixture contains an eligible power conductor");
         selectedPower->setSelected(true);
         QHash<Conductor *,ConductorProperties> previousSelection;
         for (Conductor *c : wires) previousSelection.insert(c,c->properties());
