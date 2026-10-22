@@ -64,6 +64,36 @@ int main(int argc, char **argv) {
             old.insert(c,c->properties());
         }
 
+        // Audit all QET folios/symbols/terminals/conductors BEFORE any
+        // sizing or mutation. Every wire must map to exactly one potential.
+        const auto topology=WireTrace::scan(&project);
+        require(topology.complete,"graph scan is complete");
+        require(topology.folios==project.diagrams().size(),"all folios traversed");
+        require(topology.wires==wires.size(),"every conductor was traced");
+        require(topology.elements>0 && topology.terminals>0 && !topology.groups.isEmpty(),
+                "graph records symbols, terminals and electrical potentials");
+        require(topology.groupByConductor.size()==wires.size(),
+                "every conductor maps to one potential group");
+        int groupWires=0;
+        for (int i=0;i<topology.groups.size();++i) {
+            const auto &g=topology.groups.at(i);
+            groupWires+=g.conductors.size();
+            for (Conductor *c:g.conductors) {
+                require(topology.groupByConductor.value(c,-1)==i,
+                        "graph group map is consistent");
+                require(g.wireIds.contains(WireTrace::shortUuid(c->uuid())),
+                        "trace report includes each wire UUID");
+                require(g.terminals.contains(c->terminal1) &&
+                        g.terminals.contains(c->terminal2),
+                        "each conductor retains both terminal endpoints");
+            }
+        }
+        require(groupWires==wires.size(),"no wire lost or counted twice");
+        require(topology.report().contains(QStringLiteral("Nenhum dimensionamento")),
+                "audit explicitly reports that no sizing occurred");
+        for (Conductor *c:wires)
+            require(c->properties()==old.value(c),"trace must never edit conductor properties");
+
         QetWirePrecalc::Input input;
         input.voltage=380.; input.current=10.; input.powerFactor=.85;
         const auto calc=QetWirePrecalc::calculate(input);
@@ -322,6 +352,9 @@ int main(int argc, char **argv) {
                 "Qt inputs, selected circuit sizing and completion succeeded");
         std::printf("PASS QET Qt dialog: voltage+power pair, preview, apply, confirmation\n");
 
+        std::printf("PASS QET graph tracing: %d folios, %d elements, %d terminals, %d wires, %d potentials\n",
+                    topology.folios,topology.elements,topology.terminals,
+                    topology.wires,int(topology.groups.size()));
         std::printf("PASS QET native integration: %d wires, %d auto-changed, %d unknown, persisted, undo-redo, preserved geometry\n",
                     int(wires.size()),result.modified,result.unknown);
     } catch (const std::exception &ex) {
