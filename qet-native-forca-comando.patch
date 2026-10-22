@@ -9,7 +9,7 @@ diff --git a/sources/qetdiagrameditor.cpp b/sources/qetdiagrameditor.cpp
  #include "qetgraphicsitem/ViewItem/qetgraphicstableitem.h"
  #include "qetgraphicsitem/conductortextitem.h"
  #include "qetgraphicsitem/dynamicelementtextitem.h"
-@@ -1500,7 +1501,16 @@
+@@ -1500,7 +1501,20 @@
  	m_align_menu -> addSeparator();
  	m_align_menu -> addActions(m_align_actions_group.actions().mid(4));
  	menu_edition -> addSeparator();
@@ -23,6 +23,10 @@ diff --git a/sources/qetdiagrameditor.cpp b/sources/qetdiagrameditor.cpp
 +	connect(wire_report, &QAction::triggered, this, [this]() {
 +		AutoWireProperties::showReport(this, currentProject());
 +	});
++	QAction *wire_trace = menu_edition->addAction(tr("Rastrear conexões elétricas do projeto..."));
++	connect(wire_trace, &QAction::triggered, this, [this]() {
++		WireTrace::showReport(this, currentProject());
++	});
  	menu_edition -> addSeparator();
  	menu_edition -> addAction(m_edit_diagram_properties);
  		//Shared with the folio's context menu (see
@@ -30,7 +34,7 @@ diff --git a/sources/automation/autowireproperties.h b/sources/automation/autowi
 new file mode 100644
 --- /dev/null
 +++ b/sources/automation/autowireproperties.h
-@@ -0,0 +1,588 @@
+@@ -0,0 +1,609 @@
 +/*
 + * QElectroTech - automatic educational power/control wire properties.
 + * Copyright 2026. Distributed under GPL-2.0-or-later, compatible with QET.
@@ -47,6 +51,7 @@ new file mode 100644
 +#include "../qetgraphicsitem/element.h"
 +#include "../qetgraphicsitem/terminal.h"
 +#include "wireprecalc.h"
++#include "wiretrace.h"
 +#include <QMessageBox>
 +#include <QDialog>
 +#include <QDialogButtonBox>
@@ -84,6 +89,11 @@ new file mode 100644
 +    int conflictingPotentials = 0;
 +    int sizedConductors = 0;
 +    int preservedOutOfScope = 0;
++    int tracedFolios = 0;
++    int tracedElements = 0;
++    int tracedTerminals = 0;
++    int tracedPotentials = 0;
++    bool traceComplete = false;
 +    double proposedPowerSection = 0.;
 +    QStringList details;
 +};
@@ -244,12 +254,22 @@ new file mode 100644
 +    if (!project || project->isReadOnly() || !project->undoStack() ||
 +        (!classificationOnly && (!sizing.valid || !sizing.withinTable)))
 +        return result;
++    // Always scan every page, element, terminal and conductor before
++    // deciding which electric potential may receive calculated metadata.
++    // A graph is a topology audit, not a source of guessed load currents.
++    const WireTrace::Snapshot trace = WireTrace::scan(project);
++    result.tracedFolios = trace.folios;
++    result.tracedElements = trace.elements;
++    result.tracedTerminals = trace.terminals;
++    result.tracedPotentials = trace.groups.size();
++    result.traceComplete = trace.complete;
++    if (!classificationOnly && !trace.complete) return result;
 +    result.proposedPowerSection = sizing.sectionMm2;
 +    auto *batch = new QUndoCommand(QObject::tr("Preencher propriedades de condutores (perfil didático)"));
 +    QList<QPair<Conductor *, ConductorProperties>> expected;
 +    QList<Conductor *> wires;
-+    for (Diagram *diagram : project->diagrams())
-+        if (diagram) wires.append(DiagramContent(diagram, false).conductors());
++    for (const WireTrace::PotentialGroup &group : trace.groups)
++        wires.append(group.conductors);
 +
 +    // Stage 1: direct evidence at components/terminals. A label or a
 +    // drawing colour by itself does not establish a complete circuit.
@@ -267,8 +287,10 @@ new file mode 100644
 +    // motor or function-isolating terminal to another electrical circuit.
 +    for (Conductor *c : wires) {
 +        if (!c || !c->isSelected()) continue;
-+        selectedCircuit.insert(c);
-+        selectedCircuit.unite(c->relatedPotentialConductors(true));
++        const int groupId = trace.groupByConductor.value(c, -1);
++        if (groupId < 0 || groupId >= trace.groups.size()) continue;
++        for (Conductor *member : trace.groups.at(groupId).conductors)
++            selectedCircuit.insert(member);
 +    }
 +    selectedCircuit.intersect(available);
 +    // A single motor load NEVER represents the whole panel. Global
@@ -280,26 +302,19 @@ new file mode 100644
 +    // groups. Propagate only if all classified members of the potential
 +    // agree. relatedPotentialConductors respects function-isolating
 +    // terminals and never crosses an ordinary device/contact/coil.
-+    QSet<Conductor *> visited;
-+    for (Conductor *c : wires) {
-+        if (!c || visited.contains(c)) continue;
-+        QSet<Conductor *> potential = c->relatedPotentialConductors(true);
-+        potential.insert(c);
-+        potential.intersect(available);
++    for (const WireTrace::PotentialGroup &group : trace.groups) {
 +        Role agreed = Role::Unknown;
 +        bool conflict = false;
-+        for (Conductor *member : std::as_const(potential)) {
++        for (Conductor *member : group.conductors) {
 +            const Role seed = direct.value(member, Role::Unknown);
 +            if (seed == Role::Unknown) continue;
 +            if (agreed == Role::Unknown) agreed = seed;
 +            else if (agreed != seed) conflict = true;
 +        }
 +        if (conflict) ++result.conflictingPotentials;
-+        for (Conductor *member : std::as_const(potential)) {
-+            visited.insert(member);
++        for (Conductor *member : group.conductors) {
 +            const Role seed = direct.value(member, Role::Unknown);
-+            // A contradiction in one electric potential invalidates any
-+            // automatic classification in that group, not only its blank wires.
++            // Do not propagate conflicting annotations along one potential.
 +            const Role finalRole = conflict ? Role::Unknown :
 +                                   (seed != Role::Unknown ? seed : agreed);
 +            if (seed == Role::Unknown && finalRole != Role::Unknown)
@@ -540,6 +555,13 @@ new file mode 100644
 +    // Index 1 is classification only; other circuits remain untouched.
 +    const Result r = apply(project, latest, overwrite->isChecked(),
 +                           classificationOnly);
++    if (!r.traceComplete && !classificationOnly) {
++        QMessageBox::warning(parent, QObject::tr("Rastreamento incompleto"),
++            QObject::tr("Não foi possível percorrer todos os fios/terminais. "
++                        "O dimensionamento foi bloqueado. Confira Editar → "
++                        "Rastrear conexões elétricas do projeto."));
++        return;
++    }
 +    QMessageBox message(QMessageBox::Information,
 +        classificationOnly ? QObject::tr("Identificação de fios concluída")
 +                           : QObject::tr("Pré-dimensionamento aplicado"),
@@ -550,14 +572,17 @@ new file mode 100644
 +                    "Classificados pela continuidade elétrica: %11\n"
 +                    "Grupos com evidências conflitantes: %12\n"
 +                    "Bitolas atribuídas no escopo: %13\n"
-+                    "Fios classificados fora do escopo de bitola: %14\n\n"
-+                    "Abra Editar → Ver características técnicas dos fios para conferir.")
++                    "Fios classificados fora do escopo de bitola: %14\n"
++                    "Rastreamento: %15 páginas, %16 elementos, %17 terminais, %18 potenciais\n\n"
++                    "Abra Editar → Rastrear conexões elétricas do projeto para conferir.")
 +            .arg(classificationOnly ? QObject::tr("não aplicada") :
 +                                       sectionText(r.proposedPowerSection))
 +            .arg(r.power).arg(r.control).arg(r.neutral).arg(r.earth)
 +            .arg(r.unknown).arg(r.modified).arg(r.kept).arg(r.verified).arg(r.failed)
 +            .arg(r.inferredByPotential).arg(r.conflictingPotentials)
-+            .arg(r.sizedConductors).arg(r.preservedOutOfScope),
++            .arg(r.sizedConductors).arg(r.preservedOutOfScope)
++            .arg(r.tracedFolios).arg(r.tracedElements).arg(r.tracedTerminals)
++            .arg(r.tracedPotentials),
 +        QMessageBox::Ok, parent);
 +    if (r.failed) message.setIcon(QMessageBox::Warning);
 +    if (!r.details.isEmpty()) message.setDetailedText(r.details.join(QStringLiteral("\n")));
