@@ -72,6 +72,14 @@ int main(int argc, char **argv) {
         require(topology.wires==wires.size(),"every conductor was traced");
         require(topology.elements>0 && topology.terminals>0 && !topology.groups.isEmpty(),
                 "graph records symbols, terminals and electrical potentials");
+        require(topology.componentConnections.size()==topology.elements,
+                "each element has one incidence entry linking its terminal potentials");
+        require(topology.elementsLinkingPotentials>=0 &&
+                topology.elementsLinkingPotentials<=topology.elements,
+                "component cross-potential count is bounded");
+        require(topology.report().contains(
+                    QStringLiteral("ELEMENTOS ENTRE POTENCIAIS")),
+                "audit documents component boundaries rather than assuming closed contacts");
         require(topology.groupByConductor.size()==wires.size(),
                 "every conductor maps to one potential group");
         int groupWires=0;
