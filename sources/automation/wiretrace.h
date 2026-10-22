@@ -67,6 +67,7 @@ struct Snapshot {
     int unmatchedReports = 0;
     int unsupportedMultiTerminal = 0;
     int recoveredThreePolePassages = 0;
+    int recoveredChangeoverPassages = 0;
     QList<DevicePassage> passages;
     QList<ReportHop> reportHops;
     QSet<int> unsafeGroups; // broken folio links / missing wire endpoints
@@ -263,6 +264,8 @@ struct Snapshot {
                    .arg(unsafeGroups.size());
         out << QStringLiteral("Passagens de polos reconhecidas por geometria: %1")
                    .arg(recoveredThreePolePassages);
+        out << QStringLiteral("Passagens alternativas de comutadores: %1")
+                   .arg(recoveredChangeoverPassages);
         out << QStringLiteral("Terminais sem fio: %1 | Ligações com terminal inválido: %2")
                    .arg(openTerminals).arg(invalidEndpoints);
         out << QStringLiteral("Cobertura do grafo: %1")
@@ -484,6 +487,9 @@ inline QString deviceBehaviour(const Element *element,const QString &pa,
        n.contains(QStringLiteral("relé")) ||
        n.contains(QStringLiteral("selector")) ||
        n.contains(QStringLiteral("switch")) ||
+       n.contains(QStringLiteral("interruptor")) ||
+       n.contains(QStringLiteral("comutador")) ||
+       n.contains(QStringLiteral("selector")) ||
        n.contains(QStringLiteral("contator")) ||
        n.contains(QStringLiteral("contactor")))
         return QStringLiteral("MANOBRA/PROTEÇÃO: estado do contato não verificado");
@@ -756,6 +762,44 @@ inline Snapshot scan(QETProject *project) {
                 usedPairs.insert(key);
                 ++identifiedPairs;
                 addPassage(a,b);
+            }
+            if(pins.size()==3 && identifiedPairs==0) {
+                // A changeover switch has ONE common terminal and TWO
+                // mutually-exclusive throws. Infer the common only for
+                // known switch elements and only when the two throws share
+                // an orientation different from the common.
+                const QString type=(e->name()+QStringLiteral(" ")+
+                    e->location().baseName()).toLower();
+                const bool selector=
+                    type.contains(QStringLiteral("interruptor")) ||
+                    type.contains(QStringLiteral("comutador")) ||
+                    type.contains(QStringLiteral("changeover")) ||
+                    type.contains(QStringLiteral("selector")) ||
+                    type.contains(QStringLiteral("switch")) ||
+                    type.contains(QStringLiteral("spdt"));
+                if(selector) {
+                    QHash<int,QList<Terminal *>> byOrientation;
+                    for(Terminal *pin:pins)
+                        if(pin) byOrientation[static_cast<int>(pin->orientation())] << pin;
+                    if(byOrientation.size()==2) {
+                        Terminal *common=nullptr;
+                        QList<Terminal *> throws;
+                        for(const auto &by:std::as_const(byOrientation)) {
+                            if(by.size()==1) common=by.first();
+                            else if(by.size()==2) throws=by;
+                        }
+                        if(common && throws.size()==2) {
+                            // Never connect the two throws to each other as
+                            // a permanent wire; each branch is an
+                            // alternative state of the same selector.
+                            for(Terminal *pin:throws) {
+                                addPassage(common,pin);
+                                ++identifiedPairs;
+                                ++snap.recoveredChangeoverPassages;
+                            }
+                        }
+                    }
+                }
             }
             if(pins.size()==6 && identifiedPairs==0) {
                 const auto geometricPairs=recoverThreePoleGeometry(e);
