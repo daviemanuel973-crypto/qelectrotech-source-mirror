@@ -58,6 +58,31 @@ struct Snapshot {
     QStringList folioInventory;
     QStringList warnings;
     bool complete = false;
+    // A trace potential is one equipotential node, NOT a complete load circuit.
+    // This short description helps select the corresponding wires without
+    // requiring users to manually find every segment in the drawing.
+    QString potentialSummary(int groupIndex) const {
+        if (groupIndex < 0 || groupIndex >= groups.size()) return {};
+        const PotentialGroup &g = groups.at(groupIndex);
+        QStringList pages, devices;
+        for (Diagram *folio : g.folios)
+            if (folio) pages << QStringLiteral("%1:%2")
+                .arg(folio->folioIndex()+1).arg(safeText(folio->title()));
+        for (Element *element : g.adjacentElements)
+            if (element) devices << QStringLiteral("%1 [%2]")
+                .arg(safeText(element->actualLabel()),
+                     safeText(element->name()));
+        pages.removeDuplicates(); pages.sort();
+        devices.removeDuplicates();devices.sort();
+        if (devices.size()>4) {
+            devices = devices.mid(0,4);
+            devices << QStringLiteral("...");
+        }
+        return QStringLiteral("Potencial %1 | %2 fio(s) | Página(s) %3 | %4")
+            .arg(groupIndex+1).arg(g.conductors.size())
+            .arg(pages.join(QStringLiteral(", ")))
+            .arg(devices.join(QStringLiteral("; ")));
+    }
     QString report() const {
         QStringList out;
         out << QStringLiteral("RASTREABILIDADE DO PROJETO — LEITURA SEM ALTERAÇÕES");
