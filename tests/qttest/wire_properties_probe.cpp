@@ -279,7 +279,8 @@ int main(int argc, char **argv) {
         reopenedWires.first()->setSelected(true);
         // Exercise the actual Qt dialog with an event-loop-driven test user.
         // No external GUI automation or manual installation is needed.
-        bool sawDialog=false, sawPicker=false, sawResult=false, dialogTimedOut=false;
+        bool sawDialog=false, sawPicker=false, dialogSubmitted=false,
+             sawResult=false, dialogTimedOut=false;
         int dialogPolls=0;
         QStringList guiHistory;
         QTimer poll;
@@ -307,7 +308,20 @@ int main(int argc, char **argv) {
                         continue;
                     }
                     if (d->windowTitle().contains(QStringLiteral("Dimensionamento preliminar"))) {
-                        if (sawDialog) continue;
+                        if (sawDialog) {
+                            // QTimer callbacks do not recursively dispatch
+                            // themselves while nested selector.exec() runs.
+                            // Submit only AFTER the queued picker has closed.
+                            if (sawPicker && !dialogSubmitted) {
+                                dialogSubmitted=true;
+                                const auto box=d->findChild<QDialogButtonBox*>();
+                                require(box && box->button(QDialogButtonBox::Ok)->isEnabled(),
+                                        "trace-picked V/I/P dialog remains valid");
+                                guiHistory << QStringLiteral("click-OK after-trace-picker");
+                                box->button(QDialogButtonBox::Ok)->click();
+                            }
+                            continue;
+                        }
                         sawDialog=true;
                         guiHistory << QStringLiteral("found-input-dialog");
                         const auto combos=d->findChildren<QComboBox*>();
@@ -330,8 +344,9 @@ int main(int argc, char **argv) {
                             QStringLiteral("qet_pick_trace_potentials"));
                         require(traceButton!=nullptr,
                                 "project-wide trace picker is present in the sizing UI");
-                        traceButton->click();
-                        require(sawPicker,"trace picker opens and returns selected group");
+                        QTimer::singleShot(0, traceButton, [traceButton]() {
+                            traceButton->click();
+                        });
                         // The explicit single-circuit mode re-enables sizing.
                         combos.at(2)->setCurrentIndex(0);
                         require(combos.at(0)->isEnabled() && combos.at(1)->isEnabled(),
@@ -380,10 +395,10 @@ int main(int argc, char **argv) {
                             if (label->text().contains(QStringLiteral("Resultado:")))
                                 previewFound=true;
                         require(previewFound,"live calculation displayed");
-                        guiHistory << QStringLiteral("click-OK enabled=%1 scope=%2")
-                            .arg(buttons->button(QDialogButtonBox::Ok)->isEnabled())
+                        guiHistory << QStringLiteral("input-ready scope=%1")
                             .arg(combos.at(2)->currentIndex());
-                        buttons->button(QDialogButtonBox::Ok)->click();
+                        // Submission is performed in the next poll cycle,
+                        // after the selector was handled in its own event loop.
                     }
                 }
                 if (auto *message=qobject_cast<QMessageBox*>(window)) {
