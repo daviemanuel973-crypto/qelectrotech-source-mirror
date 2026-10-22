@@ -34,7 +34,7 @@ diff --git a/sources/automation/autowireproperties.h b/sources/automation/autowi
 new file mode 100644
 --- /dev/null
 +++ b/sources/automation/autowireproperties.h
-@@ -0,0 +1,609 @@
+@@ -0,0 +1,626 @@
 +/*
 + * QElectroTech - automatic educational power/control wire properties.
 + * Copyright 2026. Distributed under GPL-2.0-or-later, compatible with QET.
@@ -381,6 +381,20 @@ new file mode 100644
 +    QDialog dialog(parent);
 +    dialog.setWindowTitle(QObject::tr("Dimensionamento preliminar de condutores"));
 +    auto *layout = new QVBoxLayout(&dialog);
++    // Explicit pre-flight audit, BEFORE entering an individual load.
++    const WireTrace::Snapshot preflight = WireTrace::scan(project);
++    auto *traceSummary = new QLabel(QObject::tr(
++        "RASTREAMENTO PRÉVIO: %1 páginas, %2 elementos, %3 terminais, "
++        "%4 fios, %5 potenciais (%6 atravessando páginas). "
++        "Conexões: %7. Consulte Editar → Rastrear conexões elétricas "
++        "do projeto para ver todos os elementos e terminais.")
++        .arg(preflight.folios).arg(preflight.elements)
++        .arg(preflight.terminals).arg(preflight.wires)
++        .arg(preflight.groups.size()).arg(preflight.multiFolioPotentials)
++        .arg(preflight.complete ? QObject::tr("verificadas") :
++                                 QObject::tr("INCOMPLETAS, bitolas bloqueadas")));
++    traceSummary->setWordWrap(true);
++    layout->addWidget(traceSummary);
 +    auto *form = new QFormLayout;
 +    layout->addLayout(form);
 +    auto *supply = new QComboBox;
@@ -514,7 +528,8 @@ new file mode 100644
 +        // Classifying a diagram is independent of the motor current.
 +        // Invalid sizing must never disable classification-only mode.
 +        const bool ok = scope->currentIndex() == 1 ||
-+                        (latest.valid && latest.withinTable && outputFits &&
++                        (preflight.complete && latest.valid &&
++                         latest.withinTable && outputFits &&
 +                         (!wantsSizing || hasCircuit));
 +        buttons->button(QDialogButtonBox::Ok)->setEnabled(ok);
 +        if (scope->currentIndex() == 1)
@@ -522,6 +537,8 @@ new file mode 100644
 +                "IDENTIFICAÇÃO APENAS: os valores de tensão, corrente e potência "
 +                "NÃO SERÃO USADOS. Para calcular seção, cancele, selecione "
 +                "os fios do circuito no desenho e reabra esta ferramenta."));
++        else if (!preflight.complete)
++            preview->setText(QObject::tr("Rastreamento incompleto: dimensionamento bloqueado."));
 +        else if (!latest.valid) preview->setText(QObject::tr("Valores inválidos."));
 +        else if (!latest.withinTable)
 +            preview->setText(QObject::tr("Corrente ou queda de tensão fora da tabela preliminar até 120 mm²."));
