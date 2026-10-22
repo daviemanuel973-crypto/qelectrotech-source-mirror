@@ -34,7 +34,7 @@ diff --git a/sources/automation/autowireproperties.h b/sources/automation/autowi
 new file mode 100644
 --- /dev/null
 +++ b/sources/automation/autowireproperties.h
-@@ -0,0 +1,692 @@
+@@ -0,0 +1,693 @@
 +/*
 + * QElectroTech - automatic educational power/control wire properties.
 + * Copyright 2026. Distributed under GPL-2.0-or-later, compatible with QET.
@@ -463,6 +463,7 @@ new file mode 100644
 +    form->addRow(QObject::tr("Escopo do cálculo:"), scope);
 +    auto *choosePotentialBtn = new QPushButton(
 +        QObject::tr("Escolher fios pelo rastreador (páginas, elementos e potenciais)..."), &dialog);
++    choosePotentialBtn->setObjectName(QStringLiteral("qet_pick_trace_potentials"));
 +    layout->addWidget(choosePotentialBtn);
 +    auto *scopeHelp = new QLabel(&dialog);
 +    auto updateScopeHelp = [&]() {
