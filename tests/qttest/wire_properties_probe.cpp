@@ -229,10 +229,21 @@ int main(int argc, char **argv) {
                         require(combos.size()==3,"supply, pair and safe sizing scope shown");
                         require(combos.at(2)->currentIndex()==1,
                                 "with no selection the default is classification only");
+                        require(fields.size()==6,"all six electrical quantities shown");
+                        for (QDoubleSpinBox *field : fields)
+                            require(!field->isEnabled(),
+                                    "classification only visibly disables ignored V/I/P sizing fields");
+                        require(!combos.at(0)->isEnabled() && !combos.at(1)->isEnabled(),
+                                "supply and pair controls are disabled in classification only");
                         // Exercise the explicit all-circuits option, including
                         // its required electrical safety confirmation.
                         combos.at(2)->setCurrentIndex(2);
-                        require(fields.size()==6,"all six electrical quantities shown");
+                        require(combos.at(0)->isEnabled() && combos.at(1)->isEnabled(),
+                                "supply and V/I/P pair controls enabled for selected sizing");
+                        require(fields.at(0)->isEnabled() && fields.at(1)->isEnabled() &&
+                                fields.at(3)->isEnabled() && fields.at(4)->isEnabled() &&
+                                fields.at(5)->isEnabled(),
+                                "electrical fields enabled when sizing is explicitly requested");
                         // Check the former 10 W minimum bug: 24 V x
                         // 0.05 A x 0.85 = 1.02 W, not 10 W.
                         combos.at(0)->setCurrentIndex(0);
