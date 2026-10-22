@@ -66,6 +66,7 @@ struct Snapshot {
     int elementsLinkingPotentials = 0;
     int unmatchedReports = 0;
     int unsupportedMultiTerminal = 0;
+    int recoveredThreePolePassages = 0;
     QList<DevicePassage> passages;
     QList<ReportHop> reportHops;
     QSet<int> unsafeGroups; // broken folio links / missing wire endpoints
@@ -260,6 +261,8 @@ struct Snapshot {
                    .arg(passages.size()).arg(reportHops.size()).arg(unmatchedReports);
         out << QStringLiteral("Potenciais com conexão inconsistente: %1")
                    .arg(unsafeGroups.size());
+        out << QStringLiteral("Passagens de polos reconhecidas por geometria: %1")
+                   .arg(recoveredThreePolePassages);
         out << QStringLiteral("Terminais sem fio: %1 | Ligações com terminal inválido: %2")
                    .arg(openTerminals).arg(invalidEndpoints);
         out << QStringLiteral("Cobertura do grafo: %1")
@@ -387,6 +390,80 @@ inline QList<QPair<QString,QString>> namedPairs() {
         {QStringLiteral("W1"),QStringLiteral("W2")}
     };
 }
+// QET libraries often contain six unnamed terminals on a three-pole
+// power contactor/thermal relay. Derive three separate pole routes only
+// for recognized THREE-POLE COMPONENTS and only for a strict 3+3 opposing
+// geometric arrangement. This is a schematic passage, not an electrical
+// short between phases or confirmation that the contact is closed.
+inline QList<QPair<Terminal *,Terminal *>> recoverThreePoleGeometry(Element *e) {
+    QList<QPair<Terminal *,Terminal *>> empty;
+    if (!e) return empty;
+    const QList<Terminal *> pins=e->terminals();
+    if(pins.size()!=6) return empty;
+    QString description=(e->name()+QStringLiteral(" ")+
+        e->location().baseName()).toLower();
+    const bool expectedDevice=
+        description.contains(QStringLiteral("com_puiss")) ||
+        description.contains(QStringLiteral("power_contact")) ||
+        description.contains(QStringLiteral("contact_puiss")) ||
+        description.contains(QStringLiteral("relais_therm")) ||
+        description.contains(QStringLiteral("thermal_relay")) ||
+        description.contains(QStringLiteral("relé térmico")) ||
+        description.contains(QStringLiteral("rele termico")) ||
+        description.contains(QStringLiteral("contacteur")) ||
+        description.contains(QStringLiteral("contactor")) ||
+        description.contains(QStringLiteral("contator")) ||
+        description.contains(QStringLiteral("contato de potência")) ||
+        description.contains(QStringLiteral("power contacts"));
+    if(!expectedDevice ||
+       description.contains(QStringLiteral("motor")) ||
+       description.contains(QStringLiteral("bobina")) ||
+       description.contains(QStringLiteral("coil")))
+        return empty;
+    // The projected terminal positions are already rotated/mirrored in
+    // scene coordinates. Try dividing along both axes and require
+    // three well-aligned matching lanes on the opposite side.
+    auto grouping=[&](bool splitY)->QList<QPair<Terminal *,Terminal *>> {
+        QList<Terminal *> sorted=pins;
+        auto ax=[&](Terminal *t)->qreal {
+            const QPointF p=t->dockConductor(); return splitY ? p.y() : p.x();
+        };
+        auto other=[&](Terminal *t)->qreal {
+            const QPointF p=t->dockConductor(); return splitY ? p.x() : p.y();
+        };
+        std::sort(sorted.begin(),sorted.end(),[&](Terminal *a,Terminal *b) {
+            return ax(a)<ax(b);
+        });
+        const qreal gap=ax(sorted.at(3))-ax(sorted.at(2));
+        if(gap<5.0) return {};
+        QList<Terminal *> left=sorted.mid(0,3),right=sorted.mid(3,3);
+        const qreal spreadL=ax(left.last())-ax(left.first());
+        const qreal spreadR=ax(right.last())-ax(right.first());
+        if(spreadL>gap*0.20 || spreadR>gap*0.20) return {};
+        std::sort(left.begin(),left.end(),[&](Terminal *a,Terminal *b) {
+            return other(a)<other(b);
+        });
+        std::sort(right.begin(),right.end(),[&](Terminal *a,Terminal *b) {
+            return other(a)<other(b);
+        });
+        const qreal span=other(left.last())-other(left.first());
+        if(span<5.0 || other(right.last())-other(right.first())<5.0) return {};
+        const qreal tolerance=std::max(qreal(3.0),span*0.12);
+        QList<QPair<Terminal *,Terminal *>> result;
+        for(int i=0;i<3;++i) {
+            if(qAbs(other(left.at(i))-other(right.at(i)))>tolerance)
+                return {};
+            result << qMakePair(left.at(i),right.at(i));
+        }
+        return result;
+    };
+    const auto y=grouping(true);
+    const auto x=grouping(false);
+    // If both axes look valid the symbol is ambiguous: don't guess.
+    if(!y.isEmpty() && !x.isEmpty())return empty;
+    return !y.isEmpty()?y:x;
+}
+
 inline QString deviceBehaviour(const Element *element,const QString &pa,
                                const QString &pb) {
     const QString n=element ? element->name().toLower() : QString();
@@ -679,6 +756,14 @@ inline Snapshot scan(QETProject *project) {
                 usedPairs.insert(key);
                 ++identifiedPairs;
                 addPassage(a,b);
+            }
+            if(pins.size()==6 && identifiedPairs==0) {
+                const auto geometricPairs=recoverThreePoleGeometry(e);
+                for(const auto &pr:geometricPairs) {
+                    addPassage(pr.first,pr.second);
+                    ++identifiedPairs;
+                    ++snap.recoveredThreePolePassages;
+                }
             }
             // A two-pin symbol has a single visible path. The report
             // explicitly marks its electrical behaviour as unverified.
