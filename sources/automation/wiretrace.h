@@ -123,6 +123,13 @@ struct Snapshot {
         }
         out << QStringLiteral("NÓS ALCANÇADOS (CAMINHOS POSSÍVEIS): %1 de %2")
                    .arg(visited.size()).arg(groups.size());
+        if(!warnings.isEmpty()) {
+            out << QStringLiteral("===== AVISOS DE CONEXÃO/TERMINAIS NÃO RESOLVIDOS =====");
+            out << warnings;
+        }
+        out << QStringLiteral(
+            "Regra: passagem por dispositivo não é emenda e não transfere "
+            "automaticamente valores de tensão, corrente ou potência.");
         out << QStringLiteral("Não foi calculada nem aplicada bitola por este rastreamento.");
         return out.join(QLatin1Char('\n'));
     }
