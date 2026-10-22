@@ -430,8 +430,11 @@ inline QList<QPair<Terminal *,Terminal *>> recoverThreePoleGeometry(Element *e) 
         description.contains(QStringLiteral("contator")) ||
         description.contains(QStringLiteral("contato de potência")) ||
         description.contains(QStringLiteral("power contacts"));
+    // A contactor or thermal relay may correctly be described as
+    // "proteção de motor"; the word motor must NOT hide its three poles.
+    // Actual six-terminal motors without contactor/relay markers remain
+    // excluded by expectedDevice above.
     if(!expectedDevice ||
-       description.contains(QStringLiteral("motor")) ||
        description.contains(QStringLiteral("bobina")) ||
        description.contains(QStringLiteral("coil")))
         return empty;
