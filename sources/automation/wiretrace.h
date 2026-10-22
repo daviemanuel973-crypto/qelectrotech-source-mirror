@@ -80,6 +80,90 @@ struct Snapshot {
         return id>=0 && id<groups.size() && !unsafeGroups.contains(id) &&
                !groups.at(id).hasUnconnectedEndpoint;
     }
+    // A physically plausible route through terminal pairs is not proof that
+    // contacts are closed. We document every crossing and its uncertainty.
+    QString routeBetween(int from, int to) const {
+        if (from<0 || to<0 || from>=groups.size() || to>=groups.size())
+            return QStringLiteral("Origem ou destino fora do grafo rastreado.");
+        QStringList out;
+        out << QStringLiteral("ROTA ENTRE POTENCIAIS %1 e %2")
+                    .arg(from+1).arg(to+1);
+        out << QStringLiteral("Arestas entre dispositivos não são emendas; "
+                              "contatos e conversores podem interromper energia.");
+        if (from==to) {
+            out << QStringLiteral("Os dois fios pertencem ao MESMO potencial (%1).")
+                        .arg(from+1);
+            for (const ReportHop &hop : reportHops)
+                if (hop.a==from || hop.b==from)
+                    out << QStringLiteral("  CONTINUAÇÃO DE FOLHA: %1 (pág.%2) → %3 (pág.%4)")
+                        .arg(hop.source,hop.fromPage,hop.destination,hop.toPage);
+            return out.join(QLatin1Char('\n'));
+        }
+        QQueue<int> queue;
+        QHash<int,int> previousNode;
+        QHash<int,int> previousArc;
+        queue.enqueue(from);
+        previousNode.insert(from,-1);
+        while(!queue.isEmpty() && !previousNode.contains(to)) {
+            const int node=queue.dequeue();
+            for(int idx=0;idx<passages.size();++idx) {
+                const DevicePassage &arc=passages.at(idx);
+                const int next=arc.a==node ? arc.b : arc.b==node ? arc.a : -1;
+                if(next<0 || previousNode.contains(next) || !arc.traversable)
+                    continue;
+                previousNode.insert(next,node);
+                previousArc.insert(next,idx);
+                queue.enqueue(next);
+            }
+        }
+        if(!previousNode.contains(to)) {
+            out << QStringLiteral(
+                "SEM ROTA: nenhum encadeamento de terminais identificados "
+                "liga esses potenciais. Verifique pares de terminais, bornes "
+                "sem nome, setas sem vínculo e componentes multipolares.");
+            return out.join(QLatin1Char('\n'));
+        }
+        QList<int> steps;
+        for(int node=to;node!=from;node=previousNode.value(node))
+            steps.prepend(previousArc.value(node));
+        int cursor=from;
+        out << QStringLiteral("PARTIDA: %1").arg(potentialSummary(from));
+        bool acrossLoad=false,acrossConverter=false,conditional=false,unknown=false;
+        for(int idx:steps) {
+            const DevicePassage &arc=passages.at(idx);
+            const int next=arc.a==cursor ? arc.b : arc.a;
+            const QString inputPin=arc.a==cursor ? arc.pinA : arc.pinB;
+            const QString outputPin=arc.a==cursor ? arc.pinB : arc.pinA;
+            out << QStringLiteral(
+                "P%1 → pág.%2 %3 [%4] (%5 → %6) → P%7 | %8")
+                .arg(cursor+1).arg(arc.page,arc.label,arc.elementId,
+                     inputPin,outputPin).arg(next+1).arg(arc.behaviour);
+            conditional |= arc.behaviour.startsWith(QStringLiteral("MANOBRA"));
+            acrossLoad |= arc.behaviour.startsWith(QStringLiteral("CARGA"));
+            acrossConverter |= arc.behaviour.startsWith(QStringLiteral("CONVERSÃO"));
+            unknown |= arc.behaviour.startsWith(QStringLiteral("DISPOSITIVO"));
+            for(const ReportHop &hop:reportHops)
+                if((hop.a==next || hop.b==next) &&
+                   (hop.fromPage!=hop.toPage))
+                    out << QStringLiteral("  ↳ SETAS VINCULADAS: pág.%1 %2 → pág.%3 %4")
+                        .arg(hop.fromPage,hop.source,hop.toPage,hop.destination);
+            cursor=next;
+        }
+        out << QStringLiteral("DESTINO: %1").arg(potentialSummary(to));
+        if(conditional)
+            out << QStringLiteral("ATENÇÃO: passa por contatos de estado desconhecido.");
+        if(acrossLoad)
+            out << QStringLiteral("ATENÇÃO: passa por uma carga; a corrente pode mudar.");
+        if(acrossConverter)
+            out << QStringLiteral("ATENÇÃO: passa por conversor/fonte; tensão e corrente não são transferidas.");
+        if(unknown)
+            out << QStringLiteral("ATENÇÃO: passa por elementos cuja conexão interna não foi confirmada.");
+        if(unsafeGroups.contains(from) || unsafeGroups.contains(to))
+            out << QStringLiteral("ATENÇÃO: pelo menos uma extremidade contém conexões inconsistentes.");
+        out << QStringLiteral(
+            "ROTA ESQUEMÁTICA, NÃO É PROVA DE ENERGIZAÇÃO OU DIMENSIONAMENTO.");
+        return out.join(QLatin1Char('\n'));
+    }
     // 'complete' refers to topology index coverage, not certified electric design.
     QString pathReport(int start) const {
         QStringList out;
@@ -631,11 +715,14 @@ inline void showPaths(QWidget *parent, QETProject *project) {
         QMessageBox::information(parent,QObject::tr("Percorrer circuito"),
             QObject::tr("Nenhum fio foi encontrado."));return;
     }
-    int start=-1;
+    int start=-1, destination=-1;
     for(int i=0;i<graph.groups.size();++i) {
-        for(Conductor *wire:graph.groups.at(i).conductors)
-            if(wire && wire->isSelected()) {start=i;break;}
-        if(start>=0)break;
+        for(Conductor *wire:graph.groups.at(i).conductors) {
+            if(!wire || !wire->isSelected()) continue;
+            if(start<0) start=i;
+            else if(i!=start) {destination=i;break;}
+        }
+        if(destination>=0)break;
     }
     if(start<0) {
         QStringList choices;
@@ -650,12 +737,16 @@ inline void showPaths(QWidget *parent, QETProject *project) {
     }
     QMessageBox box(QMessageBox::Information,
         QObject::tr("Percurso do circuito entre elementos e folhas"),
-        QObject::tr("Ponto inicial: potencial %1. O percurso segue pelos "
-                    "dispositivos e pelas setas de continuação entre folhas. "
-                    "Estados de contato e dados nominais permanecem "
-                    "não verificados. Clique em 'Mostrar detalhes'.")
-          .arg(start+1),QMessageBox::Ok,parent);
-    box.setDetailedText(graph.pathReport(start));
+        destination>=0 ?
+            QObject::tr("Rota entre potenciais %1 e %2. Clique em 'Mostrar detalhes'.")
+                .arg(start+1).arg(destination+1) :
+            QObject::tr("Partida no potencial %1. Para ver um percurso até "
+                        "um destino específico, selecione DOIS fios no desenho, "
+                        "um na origem e outro no destino. Clique em 'Mostrar detalhes'.")
+                .arg(start+1),
+        QMessageBox::Ok,parent);
+    box.setDetailedText(destination>=0 ?
+        graph.routeBetween(start,destination) : graph.pathReport(start));
     box.exec();
 }
 inline void showReport(QWidget *parent, QETProject *project) {
