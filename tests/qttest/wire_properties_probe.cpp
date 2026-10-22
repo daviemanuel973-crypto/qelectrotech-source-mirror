@@ -89,7 +89,7 @@ int main(int argc, char **argv) {
         // classification-only request with invalid electrical input is valid.
         QetWirePrecalc::Output invalidSizing;
         const auto classified=AutoWireProperties::apply(
-            &project,invalidSizing,false,false,true);
+            &project,invalidSizing,false,true);
         require(classified.power+classified.control+classified.earth+
                 classified.neutral+classified.unknown==wires.size(),
                 "classification works even without sizing parameters");
@@ -207,10 +207,13 @@ int main(int argc, char **argv) {
                 found=true;
         }
         require(found,"technical fields persist after save and reopen");
+        // Open the sizing dialog with a single explicitly selected wire.
+        // Whole-project V/I/P sizing is deliberately no longer available.
+        require(!reopenedWires.isEmpty(),"saved project still has wires");
+        reopenedWires.first()->setSelected(true);
         // Exercise the actual Qt dialog with an event-loop-driven test user.
         // No external GUI automation or manual installation is needed.
-        bool sawDialog=false, sawResult=false, sawGlobalWarning=false,
-             dialogTimedOut=false;
+        bool sawDialog=false, sawResult=false, dialogTimedOut=false;
         int dialogPolls=0;
         QStringList guiHistory;
         QTimer poll;
@@ -227,17 +230,19 @@ int main(int argc, char **argv) {
                         const auto combos=d->findChildren<QComboBox*>();
                         const auto fields=d->findChildren<QDoubleSpinBox*>();
                         require(combos.size()==3,"supply, pair and safe sizing scope shown");
-                        require(combos.at(2)->currentIndex()==1,
-                                "with no selection the default is classification only");
+                        require(combos.at(2)->count()==2,
+                                "unsafe project-wide section setting is absent");
+                        require(combos.at(2)->currentIndex()==0,
+                                "selected circuit is preselected for sizing");
                         require(fields.size()==6,"all six electrical quantities shown");
+                        combos.at(2)->setCurrentIndex(1);
                         for (QDoubleSpinBox *field : fields)
                             require(!field->isEnabled(),
-                                    "classification only visibly disables ignored V/I/P sizing fields");
+                                    "classification only visibly disables V/I/P fields");
                         require(!combos.at(0)->isEnabled() && !combos.at(1)->isEnabled(),
-                                "supply and pair controls are disabled in classification only");
-                        // Exercise the explicit all-circuits option, including
-                        // its required electrical safety confirmation.
-                        combos.at(2)->setCurrentIndex(2);
+                                "supply and pair disabled during classification");
+                        // The explicit single-circuit mode re-enables sizing.
+                        combos.at(2)->setCurrentIndex(0);
                         require(combos.at(0)->isEnabled() && combos.at(1)->isEnabled(),
                                 "supply and V/I/P pair controls enabled for selected sizing");
                         require(fields.at(0)->isEnabled() && fields.at(1)->isEnabled() &&
@@ -276,21 +281,6 @@ int main(int argc, char **argv) {
                     }
                 }
                 if (auto *message=qobject_cast<QMessageBox*>(window)) {
-                    if (message->windowTitle().contains(QStringLiteral("Dimensionamento global não verificado"))) {
-                        sawGlobalWarning=true;
-                        guiHistory << QStringLiteral("global-safety-warning");
-                        // QMessageBox::warning() maps the *clicked standard
-                        // button*, not just the QDialog::done() result.
-                        // done(Yes) closes the box but can return NoButton,
-                        // causing the application to cancel the operation.
-                        if (QAbstractButton *yes = message->button(QMessageBox::Yes)) {
-                            guiHistory << QStringLiteral("clicked-actual-Yes-button");
-                            yes->click();
-                        } else {
-                            guiHistory << QStringLiteral("ERROR-No-Yes-button");
-                            message->reject();
-                        }
-                    }
                     if (message->windowTitle().contains(QStringLiteral("Pré-dimensionamento aplicado"))) {
                         sawResult=true;
                         guiHistory << QStringLiteral("result-dialog");
@@ -315,13 +305,13 @@ int main(int argc, char **argv) {
         AutoWireProperties::run(nullptr, &reopened);
         poll.stop();
         watchdog.stop();
-        std::printf("GUI trace: sawDialog=%d, warning=%d, result=%d, timedOut=%d, polls=%d, events=%s\n",
-            int(sawDialog),int(sawGlobalWarning),int(sawResult),
+        std::printf("GUI trace: sawDialog=%d, result=%d, timedOut=%d, polls=%d, events=%s\n",
+            int(sawDialog),int(sawResult),
             int(dialogTimedOut),dialogPolls,
             qPrintable(guiHistory.join(QStringLiteral(";"))));
         std::fflush(stdout);
-        require(!dialogTimedOut && sawDialog && sawResult && sawGlobalWarning,
-                "Qt inputs, advanced scope warning and completion succeeded");
+        require(!dialogTimedOut && sawDialog && sawResult,
+                "Qt inputs, selected circuit sizing and completion succeeded");
         std::printf("PASS QET Qt dialog: voltage+power pair, preview, apply, confirmation\n");
 
         std::printf("PASS QET native integration: %d wires, %d auto-changed, %d unknown, persisted, undo-redo, preserved geometry\n",
