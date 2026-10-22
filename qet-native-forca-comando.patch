@@ -9,7 +9,7 @@ diff --git a/sources/qetdiagrameditor.cpp b/sources/qetdiagrameditor.cpp
  #include "qetgraphicsitem/ViewItem/qetgraphicstableitem.h"
  #include "qetgraphicsitem/conductortextitem.h"
  #include "qetgraphicsitem/dynamicelementtextitem.h"
-@@ -1500,7 +1501,20 @@
+@@ -1500,7 +1501,24 @@
  	m_align_menu -> addSeparator();
  	m_align_menu -> addActions(m_align_actions_group.actions().mid(4));
  	menu_edition -> addSeparator();
@@ -26,6 +26,10 @@ diff --git a/sources/qetdiagrameditor.cpp b/sources/qetdiagrameditor.cpp
 +	QAction *wire_trace = menu_edition->addAction(tr("Rastrear conexões elétricas do projeto..."));
 +	connect(wire_trace, &QAction::triggered, this, [this]() {
 +		WireTrace::showReport(this, currentProject());
++	});
++	QAction *wire_path = menu_edition->addAction(tr("Percorrer circuito por elementos e setas entre folhas..."));
++	connect(wire_path, &QAction::triggered, this, [this]() {
++		WireTrace::showPaths(this, currentProject());
 +	});
  	menu_edition -> addSeparator();
  	menu_edition -> addAction(m_edit_diagram_properties);
