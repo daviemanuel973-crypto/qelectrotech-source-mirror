@@ -123,6 +123,75 @@ int main(int argc, char **argv) {
         for (Conductor *c:wires)
             require(c->properties()==old.value(c),"trace must never edit conductor properties");
 
+        // A bornes's documentation-only reference must survive in the
+        // element information without creating, rotating or revealing QET
+        // drawing text. Preserve the separate native comment/function.
+        Element *documentedTerminal=nullptr;
+        for (Diagram *folio:project.diagrams()) {
+            if (!folio || documentedTerminal) continue;
+            for (Element *element:folio->elements()) {
+                if (element && element->actualLabel().simplified().isEmpty() &&
+                    SymbolLegend::terminalLike(element)) {
+                    documentedTerminal=element;
+                    break;
+                }
+            }
+        }
+        // A real project fixture may omit terminal-style elements. The
+        // metadata primitive is valid for any empty-label element, while
+        // the user-facing editor still restricts selection to bornes.
+        if(!documentedTerminal)
+            for (Diagram *folio:project.diagrams()) {
+                if (!folio || documentedTerminal) continue;
+                for (Element *element:folio->elements())
+                    if (element && element->actualLabel().simplified().isEmpty()) {
+                        documentedTerminal=element;
+                        break;
+                    }
+            }
+        require(documentedTerminal!=nullptr,
+                "fixture offers a symbol with no native visible label");
+        const DiagramContext oldTerminalData=documentedTerminal->elementInformations();
+        const QString oldVisibleLabel=documentedTerminal->actualLabel();
+        const int oldTextItems=documentedTerminal->dynamicTextItems().size();
+        const qreal oldRotation=documentedTerminal->rotation();
+        DiagramContext withComment=oldTerminalData;
+        withComment.addValue(QStringLiteral("comment"),
+                             QStringLiteral("Borne de retorno do teste"));
+        documentedTerminal->setElementInformations(withComment);
+        project.undoStack()->push(new SymbolLegend::SetDocumentReference(
+            documentedTerminal,QStringLiteral("X5")));
+        require(documentedTerminal->elementInformations().value(
+                    SymbolLegend::documentationReferenceKey()).toString()
+                    ==QStringLiteral("X5"),
+                "documentation-only borne label was stored");
+        require(SymbolLegend::documentedDesignator(documentedTerminal)
+                    ==QStringLiteral("X5"),
+                "empty native label is supplemented by documentary reference");
+        require(documentedTerminal->actualLabel()==oldVisibleLabel &&
+                documentedTerminal->rotation()==oldRotation &&
+                documentedTerminal->dynamicTextItems().size()==oldTextItems,
+                "documentary reference does not alter text or symbol orientation");
+        const auto terminalInventory=SymbolLegend::inventory(&project);
+        bool listed=false;
+        for(const auto &item:terminalInventory.devices)
+            if(item.symbol==documentedTerminal) {
+                require(item.designator==QStringLiteral("X5"),
+                        "X5 appears in generated device schedule");
+                require(item.comment==QStringLiteral("Borne de retorno do teste"),
+                        "QET comment is preserved in its own column");
+                require(item.function==withComment.value(QStringLiteral("function")).toString().simplified(),
+                        "blank electrical function is never invented from comment");
+                listed=true;
+                break;
+            }
+        require(listed,"documentation-only terminal appears among devices");
+        project.undoStack()->undo();
+        documentedTerminal->setElementInformations(oldTerminalData);
+        require(documentedTerminal->elementInformations()==oldTerminalData &&
+                documentedTerminal->actualLabel()==oldVisibleLabel,
+                "undo and restore return original borne information and visible label");
+
         // A nomenclature row is not a graphic legend. Export the REAL
         // QET element drawings into a multipage A3 PDF, then confirm the
         // generated document is nonempty and has the PDF file signature.
