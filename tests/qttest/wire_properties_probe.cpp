@@ -404,7 +404,29 @@ int main(int argc, char **argv) {
         // Open the sizing dialog with a single explicitly selected wire.
         // Whole-project V/I/P sizing is deliberately no longer available.
         require(!reopenedWires.isEmpty(),"saved project still has wires");
-        reopenedWires.first()->setSelected(true);
+        const auto reopenedGraph=WireTrace::scan(&reopened);
+        int eligiblePotential=-1;
+        for(int id=0;id<reopenedGraph.groups.size();++id) {
+            if(!reopenedGraph.canSizeGroup(id)) continue;
+            for(Conductor *candidate:reopenedGraph.groups.at(id).conductors)
+                if(candidate && AutoWireProperties::classify(candidate) ==
+                    AutoWireProperties::Role::Power) {
+                    eligiblePotential=id;
+                    break;
+                }
+            if(eligiblePotential>=0) break;
+        }
+        if(eligiblePotential<0)
+            for(int id=0;id<reopenedGraph.groups.size();++id)
+                if(reopenedGraph.canSizeGroup(id) &&
+                   !reopenedGraph.groups.at(id).conductors.isEmpty()) {
+                    eligiblePotential=id; break;
+                }
+        require(eligiblePotential>=0,
+                "project contains a safe circuit to exercise the GUI picker");
+        for(Conductor *wire:reopenedWires)
+            if(wire)wire->setSelected(false);
+        reopenedGraph.groups.at(eligiblePotential).conductors.first()->setSelected(true);
         // Exercise the actual Qt dialog with an event-loop-driven test user.
         // No external GUI automation or manual installation is needed.
         bool sawDialog=false, sawPicker=false, dialogSubmitted=false,
@@ -427,7 +449,9 @@ int main(int argc, char **argv) {
                                     "trace picker lists project potential groups");
                             auto *mutableList=d->findChild<QListWidget*>(
                                 QStringLiteral("qet_trace_potential_list"));
-                            mutableList->item(0)->setSelected(true);
+                            require(eligiblePotential<mutableList->count(),
+                                    "suitable trace-group exists in picker");
+                            mutableList->item(eligiblePotential)->setSelected(true);
                             const auto box=d->findChild<QDialogButtonBox*>();
                             require(box && box->button(QDialogButtonBox::Ok),
                                     "trace picker has confirmation button");
