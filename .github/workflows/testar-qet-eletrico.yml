@@ -1,15 +1,11 @@
 name: Testar QET entradas eletricas e dimensionamento
 
 on:
-  push:
-    branches:
-      - feature/dados-eletricos-dimensionamento
-    paths-ignore:
-      - 'validation/status-*'
   workflow_dispatch:
+  workflow_call:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   windows:
@@ -132,19 +128,20 @@ jobs:
           cp /ucrt64/bin/libwinpthread-1.dll .
           # DLLs transitivas, conforme pratica do workflow oficial Windows do QET.
           for pass in 1 2 3; do
-            for f in ./*.dll ./*.exe ./sqldrivers/*.dll ./platforms/*.dll ./imageformats/*.dll; do
+            while IFS= read -r f; do
               test -f "$f" || continue
               while IFS= read -r dll; do
                 test -f "$dll" || continue
                 cp -n "$dll" . || true
               done < <(ldd "$f" 2>/dev/null | awk '/=> \/ucrt64\/bin\// {print $3}')
-            done
+            done < <(find . -type f \( -iname '*.dll' -o -iname '*.exe' \))
           done
           cp -r "$GITHUB_WORKSPACE/elements" "$DEST/elements"
           cp -r "$GITHUB_WORKSPACE/titleblocks" "$DEST/titleblocks"
           cp -r "$GITHUB_WORKSPACE/fonts" "$DEST/fonts" || true
           cp -r "$GITHUB_WORKSPACE/examples" "$DEST/examples" || true
           cp "$GITHUB_WORKSPACE/misc/Abrir-QET-Industrial.bat" "$DEST/Abrir QElectroTech.bat"
+          cp "$GITHUB_WORKSPACE/docs/industrial/README.md" "$DEST/LEIA-ME.md"
           mkdir -p "$DEST/validation" "$DEST/documentacao"
           cp "$GITHUB_WORKSPACE/build/lazy-folios/results.txt" "$DEST/validation/" 2>/dev/null || true
           cp "$GITHUB_WORKSPACE/build/lazy-folios/"QET-Industrial-* "$DEST/documentacao/" 2>/dev/null || true

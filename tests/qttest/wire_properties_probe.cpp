@@ -403,9 +403,9 @@ int main(int argc, char **argv) {
         // A PE must never inherit an unverified global motor section.
         Conductor *anyWire=wires.first();
         const auto beforePE=anyWire->properties();
-        const auto proposedPE=AutoWireProperties::proposal(
+        const auto proposedPreservedPE=AutoWireProperties::proposal(
             anyWire,AutoWireProperties::Role::Earth,calc,true,true);
-        require(proposedPE.m_wire_section==beforePE.m_wire_section,
+        require(proposedPreservedPE.m_wire_section==beforePE.m_wire_section,
                 "PE section not guessed from motor's preliminary section");
 
         // Independent controlled metadata test, even if the fixture has no
@@ -449,6 +449,10 @@ int main(int argc, char **argv) {
                 found=true;
         }
         require(found,"technical fields persist after save and reopen");
+        for(Conductor *c:reopenedWires)if(!c->properties().m_sizing_data.isEmpty()) {
+            require(QJsonDocument::fromJson(c->properties().m_sizing_data.toUtf8()).isObject(),
+                    "calculation audit persists as valid versioned JSON in native XML");
+        }
         // Open the sizing dialog with a single explicitly selected wire.
         // Whole-project V/I/P sizing is deliberately no longer available.
         require(!reopenedWires.isEmpty(),"saved project still has wires");
@@ -505,7 +509,7 @@ int main(int argc, char **argv) {
                                     "trace picker has confirmation button");
                             box->button(QDialogButtonBox::Ok)->click();
                         }
-                        continue;
+                        return; // Let selector.exec() unwind before submitting its parent.
                     }
                     if (d->windowTitle().contains(QStringLiteral("Dimensionamento preliminar"))) {
                         if (sawDialog) {
@@ -521,6 +525,7 @@ int main(int argc, char **argv) {
                                 const auto box=d->findChild<QDialogButtonBox*>();
                                 require(box && box->button(QDialogButtonBox::Ok)->isEnabled(),
                                         "trace-picked V/I/P dialog remains valid");
+                                d->grab().save(QDir(QString::fromLocal8Bit(argv[3])).filePath("dimensionamento.png"));
                                 guiHistory << QStringLiteral("click-OK after-trace-picker");
                                 box->button(QDialogButtonBox::Ok)->click();
                             }
@@ -639,6 +644,34 @@ int main(int argc, char **argv) {
         std::fflush(stdout);
         require(!dialogTimedOut && sawDialog && sawPicker && sawResult,
                 "Qt trace picker, selected circuit sizing and completion succeeded");
+        Element *uiTerminal=nullptr;
+        for(Diagram*d:reopened.diagrams())for(Element*e:d->elements())
+            if(!uiTerminal && SymbolLegend::terminalLike(e))uiTerminal=e;
+        require(uiTerminal,"real fixture contains a terminal for the documentation editor");
+        for(Diagram*d:reopened.diagrams())d->clearSelection();
+        uiTerminal->setSelected(true);const qreal terminalRotation=uiTerminal->rotation();
+        const QString terminalLabel=uiTerminal->actualLabel();
+        bool editedTerminal=false;
+        QTimer editPoll;editPoll.setInterval(20);
+        QObject::connect(&editPoll,&QTimer::timeout,&app,[&](){
+            for(QWidget*w:QApplication::topLevelWidgets())if(auto*d=qobject_cast<QDialog*>(w)) {
+                if(!d->isVisible())continue;
+                auto*table=d->findChild<QTableWidget*>("qet_terminal_documentation_table");
+                if(!table)continue;
+                require(table->rowCount()==1 && table->columnCount()==7,"selected terminal documentary editor opens");
+                table->item(0,1)->setText("X5");table->item(0,2)->setText("Retorno da boia");
+                table->item(0,3)->setText("Sinal de nível");table->item(0,4)->setText("Borne documental do exemplo");
+                table->item(0,5)->setText("Fabricante de demonstração");table->item(0,6)->setText("DEMO-X5");
+                d->grab().save(QDir(QString::fromLocal8Bit(argv[3])).filePath("editor-bornes.png"));
+                editedTerminal=true;d->accept();
+            }
+        });editPoll.start();QTimer::singleShot(15000,&editPoll,&QTimer::stop);
+        SymbolLegend::setDocumentReferences(nullptr,&reopened);editPoll.stop();
+        require(editedTerminal && SymbolLegend::documentedDesignator(uiTerminal)=="X5","native terminal table applied documentary ID");
+        require(uiTerminal->rotation()==terminalRotation && uiTerminal->actualLabel()==terminalLabel,
+                "terminal table keeps actual drawing rotation and label");
+        reopened.undoStack()->undo();reopened.undoStack()->redo();
+        const QUuid documentedTerminalUuid=uiTerminal->uuid();
         const int originalFolios=reopened.diagrams().size();
         const int originalWireCount=WireTrace::scan(&reopened).wires;
         const int sheets=IndustrialDocumentation::createSheets(&reopened);
@@ -656,6 +689,21 @@ int main(int argc, char **argv) {
         reopened.setFilePath(demoPath);require(reopened.write().isOk(),"native documentation save");
         QETProject documented(demoPath);require(documented.state()==QETProject::Ok,"native documentation reopens");
         require(documented.diagrams().size()==originalFolios+sheets,"documentation survives reopen");
+        bool terminalRestored=false;
+        for(Diagram*d:documented.diagrams())if(!IndustrialDocumentation::generated(d))
+            for(Element*e:d->elements())if(e->uuid()==documentedTerminalUuid) {
+                terminalRestored=SymbolLegend::documentedDesignator(e)=="X5" &&
+                    e->elementInformations().value("function").toString()=="Sinal de nível" &&
+                    e->elementInformations().value("description").toString()=="Borne documental do exemplo";
+            }
+        require(terminalRestored,"terminal ID, function and textual description survive actual project save/reopen");
+        int restoredVectorSymbols=0;
+        for(Diagram*d:documented.diagrams())if(IndustrialDocumentation::generated(d)) {
+            require(d->elements().isEmpty(),"symbol legend graphics are not electrical components");
+            for(auto *item:d->items())if(auto*shape=qgraphicsitem_cast<QetShapeItem*>(item))
+                if(shape->hasDocumentaryVector())++restoredVectorSymbols;
+        }
+        require(restoredVectorSymbols==inventory.symbols.size(),"all actual vector pictograms survive native shape XML");
         require(WireTrace::scan(&documented).wires==originalWireCount,"generated-folio marker survives XML");
         require(IndustrialDocumentation::writePdf(&documented,QDir(QString::fromLocal8Bit(argv[3]))
             .filePath("QET-Industrial-Documentacao.pdf")),"complete industrial PDF export");

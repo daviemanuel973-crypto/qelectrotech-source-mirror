@@ -16,7 +16,7 @@ if not fixture.exists():fixture=root/'examples/industrial.qet'
 if not fixture.exists():raise SystemExit('No actual QET project available for runtime test')
 with tempfile.TemporaryDirectory(prefix='qet portable space ') as work:
     output=pathlib.Path(work)/'opened-project.json'
-    command=[str(exe),'--info',str(fixture),'-o',str(output),'--common-elements-dir='+str(root/'elements'),
+    command=[str(exe),'--info',str(fixture),str(output),'--common-elements-dir='+str(root/'elements'),
         '--common-tbt-dir='+str(root/'titleblocks'),'--lang-dir='+str(root/'lang'),'--config-dir='+work]
     result=subprocess.run(command,cwd=work,env=env,capture_output=True,text=True,timeout=180)
     if result.returncode or not output.exists():raise SystemExit(f'Packaged Windows run failed ({result.returncode}): {result.stdout}\n{result.stderr}')

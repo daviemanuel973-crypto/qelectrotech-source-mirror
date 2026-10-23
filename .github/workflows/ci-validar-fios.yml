@@ -1,0 +1,10 @@
+name: QET CI - Testar fios e janela eletrica
+on:
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    uses: ./.github/workflows/testar-qet-eletrico.yml

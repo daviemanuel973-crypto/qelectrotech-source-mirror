@@ -498,21 +498,16 @@ inline QString deviceBehaviour(const Element *element,const QString &pa,
        n.contains(QStringLiteral("retificador")))
         return QStringLiteral("CONVERSÃO: não transmitir tensão/corrente entre domínios");
     if((pa==QStringLiteral("A1") && pb==QStringLiteral("A2")) ||
-       n.contains(QStringLiteral("bobina")) ||
-       n.contains(QStringLiteral("coil")) ||
-       n.contains(QStringLiteral("motor")) ||
-       n.contains(QStringLiteral("lamp")) ||
-       n.contains(QStringLiteral("lâmpada")) ||
-       n.contains(QStringLiteral("resistor")))
-        return QStringLiteral("CARGA: entrada/saída do dispositivo, não continuidade de fio");
+       n.contains(QStringLiteral("bobina")) || n.contains(QStringLiteral("coil")))
+        return QStringLiteral("CARGA: bobina; não é continuidade de fio");
     if(n.contains(QStringLiteral("contact")) ||
        n.contains(QStringLiteral("contato")) ||
        n.contains(QStringLiteral("disjuntor")) ||
        n.contains(QStringLiteral("breaker")) ||
        n.contains(QStringLiteral("fusível")) ||
        n.contains(QStringLiteral("fuse")) ||
-       n.contains(QStringLiteral("relay")) ||
-       n.contains(QStringLiteral("relé")) ||
+       n.contains(QStringLiteral("thermal relay")) ||
+       n.contains(QStringLiteral("relé térmico")) ||
        n.contains(QStringLiteral("selector")) ||
        n.contains(QStringLiteral("switch")) ||
        n.contains(QStringLiteral("interruptor")) ||
@@ -521,6 +516,9 @@ inline QString deviceBehaviour(const Element *element,const QString &pa,
        n.contains(QStringLiteral("contator")) ||
        n.contains(QStringLiteral("contactor")))
         return QStringLiteral("MANOBRA/PROTEÇÃO: estado do contato não verificado");
+    if(n.contains(QStringLiteral("motor")) || n.contains(QStringLiteral("lamp")) ||
+       n.contains(QStringLiteral("lâmpada")) || n.contains(QStringLiteral("resistor")))
+        return QStringLiteral("CARGA: entrada/saída do dispositivo, não continuidade de fio");
     return QStringLiteral("DISPOSITIVO: conexão interna não verificada");
 }
 

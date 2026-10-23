@@ -18,6 +18,8 @@
 #include "electricaldata.h"
 #include <QMessageBox>
 #include <QScrollArea>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QFormLayout>
@@ -129,14 +131,6 @@ inline Role classify(const Conductor *c) {
              declared == QStringLiteral("L2") ||
              declared == QStringLiteral("L3")) power = true;
 
-    // Legacy diagrams sometimes represent PE as a green (#00aa00)
-    // line connected to anonymous "i"/"Jump" terminals. Colour alone
-    // is a heuristic, not electrical proof, so reject conflicts with
-    // known power/control/neutral evidence; PE size stays unassigned.
-    const bool greenPeHint =
-        c->properties().color == QColor(QStringLiteral("#00aa00"))
-        && !power && !control && !neutral;
-    if (greenPeHint) earth = true;
     // Conflicts and PE/N mixes must NOT be given a made-up profile.
     if ((power && control) || (earth && (neutral || power || control)) ||
         (neutral && power)) return Role::Unknown;
@@ -184,7 +178,20 @@ inline ConductorProperties proposal(const Conductor *c, Role role,
     // in the project. Never assign its section outside the chosen circuit.
     if (selectedCircuit && section > 0. &&
         (overwrite || props.m_wire_section.trimmed().isEmpty()))
+    {
         props.m_wire_section = sectionText(section);
+        const auto &p=sizing.parameters;
+        const QJsonObject record{{"schema",1},{"section",props.m_wire_section},
+            {"voltage",sizing.voltage},{"current",sizing.current},{"power_w",sizing.power},
+            {"length_m",p.lengthMeters},{"drop_percent",sizing.dropPercent},
+            {"temperature_factor",p.temperatureFactor},{"grouping_factor",p.groupingFactor},
+            {"iz_a",sizing.correctedAmpacity},{"protection_in_a",p.protectionCurrent},
+            {"protection_i2_a",p.conventionalTripCurrent},{"fault_a",p.faultCurrent},
+            {"clearing_s",p.clearingSeconds},{"adiabatic_k",p.adiabaticK},
+            {"protection_checked",sizing.protectionChecked},{"short_circuit_checked",sizing.shortCircuitChecked},
+            {"profile",QStringLiteral("Cobre/PVC 70 C; B1; tabela preliminar; sem certificação normativa")}};
+        props.m_sizing_data=QString::fromUtf8(QJsonDocument(record).toJson(QJsonDocument::Compact));
+    }
 
     QString color;
     if (role == Role::Power) color = QStringLiteral("Preto");
@@ -202,9 +209,7 @@ inline ConductorProperties proposal(const Conductor *c, Role role,
     if (props.m_function.trimmed().isEmpty()) {
         const QString mark = explicitFunction(c);
         if (!mark.isEmpty()) props.m_function = mark;
-        else if (role == Role::Earth &&
-                 props.color == QColor(QStringLiteral("#00aa00")))
-            props.m_function = QStringLiteral("PE");
+
     }
     // Fields assigned outside the selected circuit are limited to
     // classification metadata; their size and voltage remain untouched.
@@ -350,7 +355,8 @@ inline Result apply(QETProject *project, const QetWirePrecalc::Output &sizing,
                         actual.m_wire_color == wanted.m_wire_color &&
                         actual.m_function == wanted.m_function &&
                         actual.m_tension_protocol == wanted.m_tension_protocol;
-        if (ok) ++result.verified;
+        const bool auditOk=actual.m_sizing_data==wanted.m_sizing_data;
+        if (ok && auditOk) ++result.verified;
         else ++result.failed;
         result.details << QObject::tr("Fio %1 — seção: %2; cor: %3; função: %4 — %5")
             .arg(item.first->uuid().toString(QUuid::WithoutBraces).left(8),
@@ -419,7 +425,7 @@ inline void run(QWidget *parent, QETProject *project) {
     auto *voltage = numeric(0., 0., 1000000., 6);
     auto *current = numeric(0., 0., 1000000., 6);
     auto *power = numeric(0., 0., 1000000., 9); // kW
-    auto *pf = numeric(0.85, 0.01, 1.0, 2);
+    auto *pf = numeric(0., 0., 1.0, 2);
     auto *length = numeric(0., 0., 50000., 2);
     auto *drop = numeric(4., 0.1, 15., 1);
     voltage->setSuffix(QObject::tr(" V"));

@@ -12,8 +12,10 @@ inline QStringList keys() {return {"qet_voltage_v","qet_current_a","qet_power_w"
     "qet_grouping_factor","qet_protection_a","qet_trip_i2_a","qet_fault_a","qet_clearing_s","qet_adiabatic_k"};}
 inline bool load(Element*e) {
     if(!e)return false;
-    if(e->elementInformations().contains("qet_current_a") || e->elementInformations().contains("qet_power_w"))return true;
+    if(!e->elementInformations().value("qet_current_a").toString().isEmpty() || !e->elementInformations().value("qet_power_w").toString().isEmpty())return true;
     const QString n=e->name().toLower();
+    if(n.contains("breaker") || n.contains("disjuntor") || n.contains("contact") ||
+       n.contains("contato") || n.contains("thermal relay") || n.contains("relé térmico"))return false;
     return n.contains("motor") || n.contains("coil") || n.contains("bobina") ||
            n.contains("lamp") || n.contains("resist") || n.contains("sinalizador");
 }

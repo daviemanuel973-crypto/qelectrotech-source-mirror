@@ -28,6 +28,7 @@ struct Input {
     double reactanceOhmPerKm = 0.; // 0: resistive approximation only.
 };
 struct Output {
+    Input parameters;
     bool valid = false;
     double voltage = 0., current = 0., power = 0.;
     double sectionMm2 = 0., dropPercent = 0.;
@@ -38,6 +39,7 @@ struct Output {
 };
 inline Output calculate(const Input &p) {
     Output o;
+    o.parameters=p;
     const double factor = p.supply == Supply::ThreePhase ? std::sqrt(3.0) : 1.0;
     // DC circuits have no displacement power factor. Never apply cos(phi)
     // to a 24 VDC supply output; the provided PF is ignored for DC.

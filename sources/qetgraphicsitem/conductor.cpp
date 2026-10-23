@@ -1832,6 +1832,7 @@ void Conductor::setProperties(const ConductorProperties &property)
 		same_visual.m_function = property.m_function;
 		same_visual.m_wire_color = property.m_wire_color;
 		same_visual.m_wire_section = property.m_wire_section;
+		same_visual.m_sizing_data=property.m_sizing_data;
 		same_visual.m_tension_protocol = property.m_tension_protocol;
 		if (same_visual == property)
 		{

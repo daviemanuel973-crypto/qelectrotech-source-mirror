@@ -12,6 +12,8 @@
 #include <QTextDocument>
 #include <QStringConverter>
 #include <QMap>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <memory>
 
 namespace IndustrialDocumentation {
@@ -62,9 +64,19 @@ inline QList<Table> tables(QETProject *project) {
                 WireTrace::terminalDescription(c->terminal2),p.m_wire_section,p.m_function+" / "+p.m_wire_color,
                 p.m_tension_protocol};
             ++sections[p.m_wire_section.isEmpty()?QStringLiteral("PENDENTE"):p.m_wire_section];
-            sizing.rows << QStringList{ref,p.m_wire_section,p.m_tension_protocol,
-                p.m_wire_section.isEmpty()?QStringLiteral("PENDENTE: dados da carga, comprimento e instalação"):
-                QStringLiteral("Seção cadastrada não comprova dimensionamento. Revisar proteção, queda, curto e instalação.")};
+            const auto audit=QJsonDocument::fromJson(p.m_sizing_data.toUtf8()).object();
+            QString assessment=QStringLiteral("PENDENTE: dados da carga, comprimento e instalação");
+            if(!p.m_wire_section.isEmpty())assessment=QStringLiteral("Seção cadastrada sem registro de cálculo; revisão pendente.");
+            if(audit.value("schema").toInt()==1) {
+                if(audit.value("section").toString()!=p.m_wire_section)
+                    assessment=QStringLiteral("REGISTRO DESATUALIZADO: a seção foi alterada depois do cálculo.");
+                else assessment=QStringLiteral("PRÉ-DIMENSIONAMENTO: Ib=%1 A; Iz corrigida=%2 A; L=%3 m; queda=%4%. Proteção: %5. Curto: %6. Revisar após alterar carga/instalação. Não é conformidade integral.")
+                    .arg(audit.value("current").toDouble()).arg(audit.value("iz_a").toDouble())
+                    .arg(audit.value("length_m").toDouble()).arg(audit.value("drop_percent").toDouble())
+                    .arg(audit.value("protection_checked").toBool()?"critérios Ib/In/Iz e I2 verificados":"PENDENTE")
+                    .arg(audit.value("short_circuit_checked").toBool()?"adiabático verificado":"PENDENTE");
+            }
+            sizing.rows << QStringList{ref,p.m_wire_section,p.m_tension_protocol,assessment};
         }
     }
     for(const auto &r:inv.devices) {
@@ -186,11 +198,6 @@ inline void border(Diagram*d,const QRectF&r) {
 inline int createSheets(QETProject *project) {
     if(!project || project->isReadOnly() || !project->undoStack())return 0;
     const auto inv=SymbolLegend::inventory(project);const auto ts=tables(project);
-    QList<Element*> clones;
-    for(const auto&r:inv.symbols) {
-        int state=0;auto *clone=ElementFactory::Instance()->createElement(r.symbol->location(),nullptr,&state);
-        if(!clone || state){delete clone;qDeleteAll(clones);return 0;}clones<<clone;
-    }
     project->undoStack()->beginMacro(QObject::tr("Gerar folhas de documentação industrial"));
     int count=0;
     auto page=[&](const QString&title) {
@@ -212,11 +219,11 @@ inline int createSheets(QETProject *project) {
             border(d,box);text(d,"SÍMBOLO    | LET. | DESCRIÇÃO",QRectF(box.x(),box.y(),346,20),true);
             text(d,r.abbreviation,QRectF(box.x()+77,box.y()+27,40,60),true);
             text(d,r.kind,QRectF(box.x()+120,box.y()+24,220,65));
-            Element *clone=clones.at(offset+n);
-            d->addItem(clone);const QRectF bounds=clone->boundingRect();
-            const qreal scale=std::min(60./std::max(1.,bounds.width()),58./std::max(1.,bounds.height()));
-            clone->setScale(scale);clone->setPos(box.x()+38-bounds.center().x()*scale,
-                                               box.y()+55-bounds.center().y()*scale);
+            QPicture vector;QPainter recorder(&vector);
+            r.symbol->paint(&recorder,nullptr,nullptr);recorder.end();
+            auto *graphic=new QetShapeItem(QPointF(0,0),QPointF(60,58),QetShapeItem::Rectangle);
+            graphic->setDocumentaryVector(vector);graphic->setPos(box.x()+8,box.y()+26);
+            d->addItem(graphic);
         }
     }
     for(const auto&t:ts) {
