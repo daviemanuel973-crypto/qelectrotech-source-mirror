@@ -207,7 +207,7 @@ inline int createSheets(QETProject *project) {
         d->border_and_titleblock.setColumnsCount(18);d->border_and_titleblock.setColumnsWidth(60);
         d->border_and_titleblock.setDiagramHeight(760);
         d->setBorderOptions(Diagram::EmptyBorder);
-        text(d,title,QRectF(10,10,1040,35),true);border(d,QRectF(10,10,1040,35));
+        text(d,title,QRectF(30,20,1040,35),true);border(d,QRectF(30,20,1040,35));
         ++count;return d;
     };
     // Actual native vector symbols; document folios are excluded from topology/BOM.
@@ -215,7 +215,7 @@ inline int createSheets(QETProject *project) {
         Diagram*d=page("SIMBOLOGIA");
         for(int n=0;n<21 && offset+n<inv.symbols.size();++n) {
             const auto&r=inv.symbols.at(offset+n);const int col=n%3,row=n/3;
-            const QRectF box(10+col*346,55+row*92,346,92);
+            const QRectF box(30+col*346,65+row*92,346,92);
             border(d,box);text(d,"SÍMBOLO    | LET. | DESCRIÇÃO",QRectF(box.x(),box.y(),346,20),true);
             text(d,r.abbreviation,QRectF(box.x()+77,box.y()+27,40,60),true);
             text(d,r.kind,QRectF(box.x()+120,box.y()+24,220,65));
@@ -228,7 +228,7 @@ inline int createSheets(QETProject *project) {
     for(const auto&t:ts) {
         const auto ws=widths(t,1040);Diagram*d=nullptr;int y=0;
         auto newPage=[&]() {
-            d=page(t.title);y=55;int x=10;
+            d=page(t.title);y=65;int x=30;
             for(int i=0;i<ws.size();++i){QRectF cell(x,y,ws[i],35);border(d,cell);text(d,t.headings[i],cell,true);x+=ws[i];}y+=35;
         };newPage();
         const auto rows=t.rows.isEmpty()?QList<QStringList>{{QStringLiteral("Nenhum registro aplicável.")}}:t.rows;
@@ -239,7 +239,7 @@ inline int createSheets(QETProject *project) {
                 h=std::max(h,int(doc.size().height())+6);
             }
             if(y+h>715)newPage();
-            int x=10;for(int i=0;i<ws.size();++i){QRectF cell(x,y,ws[i],h);border(d,cell);text(d,r.value(i),cell);x+=ws[i];}y+=h;
+            int x=30;for(int i=0;i<ws.size();++i){QRectF cell(x,y,ws[i],h);border(d,cell);text(d,r.value(i),cell);x+=ws[i];}y+=h;
         }
     }
     project->undoStack()->endMacro();return count;

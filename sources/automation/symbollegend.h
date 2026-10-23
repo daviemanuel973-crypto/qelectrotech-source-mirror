@@ -96,7 +96,8 @@ inline Inventory inventory(QETProject *project) {
             Record entry;
             entry.symbol=element;
             entry.designator=documentedDesignator(element);
-            entry.abbreviation=abbreviation(entry.designator);
+            entry.abbreviation=(element->linkType() & Element::AllReport) ?
+                QStringLiteral("—") : abbreviation(entry.designator);
             entry.kind=firstValue(info,{QStringLiteral("designation"),
                                         QStringLiteral("description")});
             if(entry.kind.isEmpty())entry.kind=element->name().simplified();
