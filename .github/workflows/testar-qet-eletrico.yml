@@ -77,6 +77,7 @@ jobs:
           ./test_wireprecalc.exe
 
       - name: Compilar o executavel QElectroTech.exe
+        id: compilacao
         shell: msys2 {0}
         run: |
           set -euo pipefail
@@ -128,6 +129,7 @@ jobs:
           ctest --output-on-failure --timeout 300
 
       - name: Gerar pasta portatil Windows com dependencias
+        if: ${{ always() && steps.compilacao.outcome == 'success' }}
         shell: msys2 {0}
         run: |
           set -euo pipefail
@@ -163,13 +165,14 @@ jobs:
           done
           test -s "$DEST/bin/QElectroTech.exe"
           test -d "$DEST/elements"
-          printf 'QElectroTech prototipo - Fonte: feature/dados-eletricos-dimensionamento\nCommit: %s\nAba Editar: Ver características técnicas dos fios...\n' "$(git rev-parse HEAD)" > "$DEST/REVISAO-3-ENTRADAS-LEIA-ME.txt"
+          printf 'QElectroTech em desenvolvimento - fonte: feature/dados-eletricos-dimensionamento\nCommit: %s\nAções: Documentar bornes; Gerar simbologia gráfica e tabelas; Dimensionamento preliminar de condutores; Rastrear circuitos e setas entre folhas.\nAVISO: pacote compilado; NÃO significa que os testes passaram. Confira os resultados do job no GitHub Actions. O cálculo NÃO substitui NBR 5410 nem revisão profissional.\n' "$(git rev-parse HEAD)" > "$DEST/LEIA-ME-STATUS-VALIDACAO.txt"
           echo 'Pacote REV2 preparado.'
 
       - name: Disponibilizar download do aplicativo Windows
+        if: ${{ always() && steps.compilacao.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
-          name: QET-PROTOTIPO-ENTRADAS-ELETRICAS
+          name: QET-WINDOWS-COMPILADO-${{ job.status }}
           path: QET-ForcaComando-Portatil/
           if-no-files-found: error
           retention-days: 7
