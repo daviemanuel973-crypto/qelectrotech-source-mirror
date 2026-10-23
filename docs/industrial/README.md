@@ -35,7 +35,7 @@ A seção é gravada somente nos potenciais escolhidos. Propriedades existentes 
 
 **Gerar documentação em folhas editáveis** acrescenta folhas nativas ao projeto com textos e formas editáveis. A legenda usa gravações vetoriais do próprio símbolo em formas gráficas, sem criar componentes elétricos nem novas unidades de material. A geração pode ser desfeita/refeita em um único lote. As folhas são uma fotografia dos dados no momento da geração; depois de editar o projeto, regenere as folhas. Não são tabelas com atualização automática contínua.
 
-Produtos só são agrupados quando fabricante, código e modelo permitem identificar equivalência. Ocorrências sem fabricante/código permanecem separadas. Contatos escravos vinculados a um mestre não viram produtos físicos adicionais. Dados comerciais ausentes permanecem pendentes.
+Produtos só são agrupados quando fabricante, código e modelo permitem identificar equivalência. Ocorrências sem fabricante/código permanecem separadas. Contatos escravos vinculados a um mestre não viram produtos físicos adicionais. Setas de referência entre folhas não entram como unidades de material. Dados comerciais ausentes permanecem pendentes.
 
 O projeto original continua abrindo no formato `.qet`. Formas documentais com o campo adicional `qet_symbol_vector` precisam desta versão para exibir o pictograma; versões anteriores do QET podem mostrar apenas o contorno da forma. PDF preserva a representação vetorial.
 

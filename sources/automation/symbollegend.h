@@ -128,7 +128,9 @@ inline Inventory inventory(QETProject *project) {
             if(element->linkType() & Element::Slave)
                 for(Element *linked:element->linkedElements())
                     if(linked && (linked->linkType() & Element::Master))linkedSlave=true;
-            if(linkedSlave)continue; // The linked coil/master is the physical product.
+            if(linkedSlave || (element->linkType() & Element::AllReport))continue;
+            // The linked coil/master is the physical product. Folio arrows
+            // are references, not purchasable material occurrences.
             // With missing manufacturer/product code equivalence is unknown.
             // A graphical definition is never a stock keeping identifier.
             const QString materialKey=entry.partNumber.isEmpty() || entry.manufacturer.isEmpty() ?
