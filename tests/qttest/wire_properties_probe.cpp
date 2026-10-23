@@ -161,7 +161,10 @@ int main(int argc, char **argv) {
                              QStringLiteral("Borne de retorno do teste"));
         documentedTerminal->setElementInformations(withComment);
         project.undoStack()->push(new SymbolLegend::SetDocumentReference(
-            documentedTerminal,QStringLiteral("X5")));
+            documentedTerminal,QStringLiteral("X5"),
+            QStringLiteral("Borne de retorno do teste"),
+            QStringLiteral("Retorno da bomba"),
+            QStringLiteral("Borne de conexão 24 Vcc")));
         require(documentedTerminal->elementInformations().value(
                     SymbolLegend::documentationReferenceKey()).toString()
                     ==QStringLiteral("X5"),
@@ -193,8 +196,10 @@ int main(int argc, char **argv) {
                         "X5 appears in generated device schedule");
                 require(item.comment==QStringLiteral("Borne de retorno do teste"),
                         "QET comment is preserved in its own column");
-                require(item.function==withComment.value(QStringLiteral("function")).toString().simplified(),
-                        "blank electrical function is never invented from comment");
+                require(item.function==QStringLiteral("Retorno da bomba"),
+                        "missing native Function field is stored for terminal documentation");
+                require(item.description==QStringLiteral("Borne de conexão 24 Vcc"),
+                        "missing native textual Description is stored for terminal documentation");
                 listed=true;
                 break;
             }
@@ -231,6 +236,31 @@ int main(int argc, char **argv) {
         input.voltage=380.; input.current=10.; input.powerFactor=.85;
         const auto calc=QetWirePrecalc::calculate(input);
         require(calc.valid && calc.withinTable && calc.sectionMm2>0., "preliminary sizing");
+        QetWirePrecalc::Input controlLoad=input;
+        controlLoad.current=38.;
+        controlLoad.lengthMeters=140.;
+        const auto controlSizing=QetWirePrecalc::calculate(controlLoad);
+        require(controlSizing.valid && controlSizing.withinTable &&
+                controlSizing.sectionMm2>1.5,
+                "real electrical input for long control circuit needs more than 1.5mm2");
+        const auto proposedControl=AutoWireProperties::proposal(
+            wires.first(),AutoWireProperties::Role::Control,
+            controlSizing,true,true);
+        require(proposedControl.m_wire_section==
+                    AutoWireProperties::sectionText(controlSizing.sectionMm2),
+                "control circuit sizing uses calculated section, never fixed 1.5mm2");
+        const auto proposedUnclassified=AutoWireProperties::proposal(
+            wires.first(),AutoWireProperties::Role::Unknown,
+            controlSizing,true,true);
+        require(proposedUnclassified.m_wire_section==
+                    AutoWireProperties::sectionText(controlSizing.sectionMm2),
+                "explicitly selected unclassified circuit accepts user-verified sizing");
+        const auto proposedPE=AutoWireProperties::proposal(
+            wires.first(),AutoWireProperties::Role::Earth,
+            controlSizing,false,true);
+        require(proposedPE.m_wire_section==wires.first()->properties().m_wire_section,
+                "PE section is never assigned from a generic load");
+
         const auto result=AutoWireProperties::apply(&project, calc);
         require(result.failed==0, "all requests verified after application");
         // No selection means no global sizing: multiple motors may have
