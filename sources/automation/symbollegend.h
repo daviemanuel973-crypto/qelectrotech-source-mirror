@@ -216,7 +216,6 @@ inline bool renderDeviceList(QPainter &p,QPdfWriter &pdf,
                              const Inventory &inv,const QRect &page,
                              const QString &projectTitle,int &folio) {
     const int rows=22;
-    const int heights[3]={22,60,18};
     const int w1=page.width()*18/100,w2=page.width()*65/100,w3=page.width()-w1-w2;
     for(int offset=0;offset<inv.devices.size();offset+=rows) {
         if(!pdf.newPage())return false;
@@ -274,6 +273,28 @@ inline bool renderMaterials(QPainter &p,QPdfWriter &pdf,const Inventory &inv,
     }
     return true;
 }
+// Noninteractive writer is shared by the GUI action and native regression
+// checks: a successful list alone does not verify real symbol drawings.
+inline bool writePdf(QETProject *project,const QString &path) {
+    if(!project || path.isEmpty()) return false;
+    const Inventory inv=inventory(project);
+    if(inv.symbols.isEmpty())return false;
+    QPdfWriter pdf(path);
+    pdf.setPageSize(QPageSize(QPageSize::A3));
+    pdf.setPageOrientation(QPageLayout::Landscape);
+    pdf.setPageMargins(QMarginsF(12,12,12,12),QPageLayout::Millimeter);
+    pdf.setResolution(150);
+    pdf.setTitle(QObject::tr("Simbologia, função dos dispositivos e relação de materiais"));
+    QPainter painter(&pdf);
+    if(!painter.isActive())return false;
+    const QRect page(0,0,pdf.width(),pdf.height());
+    int folio=0;
+    const bool ok=renderSymbols(painter,pdf,inv,page,project->title(),folio) &&
+                  renderDeviceList(painter,pdf,inv,page,project->title(),folio) &&
+                  renderMaterials(painter,pdf,inv,page,project->title(),folio);
+    painter.end();
+    return ok;
+}
 inline void exportPdf(QWidget *parent,QETProject *project) {
     if(!project) {
         QMessageBox::warning(parent,QObject::tr("Gerar simbologia"),
@@ -291,27 +312,9 @@ inline void exportPdf(QWidget *parent,QETProject *project) {
         QStringLiteral("simbologia-e-documentacao.pdf"),
         QObject::tr("Documento PDF (*.pdf)"));
     if(path.isEmpty())return;
-    QPdfWriter pdf(path);
-    pdf.setPageSize(QPageSize(QPageSize::A3));
-    pdf.setPageOrientation(QPageLayout::Landscape);
-    pdf.setPageMargins(QMarginsF(12,12,12,12),QPageLayout::Millimeter);
-    pdf.setResolution(150);
-    pdf.setTitle(QObject::tr("Simbologia, função dos dispositivos e relação de materiais"));
-    QPainter painter(&pdf);
-    if(!painter.isActive()) {
+    if(!writePdf(project,path)) {
         QMessageBox::warning(parent,QObject::tr("Gerar simbologia"),
-                             QObject::tr("Não foi possível criar o arquivo PDF."));
-        return;
-    }
-    const QRect page(0,0,pdf.width(),pdf.height());
-    int folio=0;
-    const bool ok=renderSymbols(painter,pdf,inv,page,project->title(),folio) &&
-                  renderDeviceList(painter,pdf,inv,page,project->title(),folio) &&
-                  renderMaterials(painter,pdf,inv,page,project->title(),folio);
-    painter.end();
-    if(!ok) {
-        QMessageBox::warning(parent,QObject::tr("Gerar simbologia"),
-            QObject::tr("Houve falha ao escrever uma ou mais páginas do PDF."));
+            QObject::tr("Houve falha ao criar o PDF com os símbolos do projeto."));
         return;
     }
     QMessageBox::information(parent,QObject::tr("Documentação gerada"),
