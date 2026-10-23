@@ -137,7 +137,7 @@ QList<CableCrossing> CableManager::crossedConductors(Diagram *diagram, const QLi
 	}
 
 	const QPointF start = line.p1();
-	if (qFuzzyCompare(start, line.p2())) {
+	if ((qFuzzyCompare(start.x(), line.p2().x()) && qFuzzyCompare(start.y(), line.p2().y()))) {
 		return crossings;
 	}
 
@@ -188,7 +188,7 @@ bool CableManager::crossingOf(Diagram *diagram,
 
 	const QPointF start = line.p1();
 	const QPointF end = line.p2();
-	if (qFuzzyCompare(start, end)) return false;
+	if ((qFuzzyCompare(start.x(), end.x()) && qFuzzyCompare(start.y(), end.y()))) return false;
 
 		//Work in the conductor's own coordinates: its path is stored
 		//there, and a conductor is never where it was when it was

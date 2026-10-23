@@ -17,6 +17,7 @@ parser.add_argument('--build', required=True)
 parser.add_argument('--binary', required=True)
 parser.add_argument('--source', required=True)
 parser.add_argument('--fixture', required=True)
+parser.add_argument('--output-dir')
 args = parser.parse_args()
 build = pathlib.Path(args.build).resolve()
 binary = pathlib.Path(args.binary).resolve()
@@ -51,7 +52,7 @@ if not ninja:
     sys.exit('Ninja is required for the integration probe.')
 target = probe_binary.name if probe_binary.parent == build else str(probe_binary)
 subprocess.run([ninja, '-C', str(build), '-f', probe_manifest.name, target], check=True)
-output = build / 'lazy-folios'
+output = pathlib.Path(args.output_dir).resolve() if args.output_dir else build / 'lazy-folios'
 output.mkdir(exist_ok=True)
 report = output / 'results.txt'
 result = subprocess.run([str(probe_binary), str(fixture), str(report), str(output)], timeout=1500)
