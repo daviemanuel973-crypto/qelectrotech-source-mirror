@@ -25,6 +25,11 @@
 #include <QPointer>
 #include <QUndoCommand>
 #include <QPushButton>
+#include <QDialog>
+#include <QVBoxLayout>
+#include <QFormLayout>
+#include <QDialogButtonBox>
+#include <QLabel>
 #include <algorithm>
 
 namespace SymbolLegend {
@@ -328,10 +333,22 @@ public:
     SetDocumentReference(Element *element,const QString &reference,
                          QUndoCommand *parent=nullptr)
         : QUndoCommand(parent),m_element(element),
-          m_before(element->elementInformations()),
-          m_after(m_before) {
+          m_before(element->elementInformations()),m_after(m_before) {
         m_after.addValue(documentationReferenceKey(),reference,false);
-        setText(QObject::tr("Definir referência documental do borne"));
+        setText(QObject::tr("Referência documental do borne"));
+    }
+    // The stock terminal editor does not expose "function" or
+    // "description", but DiagramContext persists these QET keys in XML.
+    SetDocumentReference(Element *element,const QString &reference,
+                         const QString &comment,const QString &function,
+                         const QString &description,QUndoCommand *parent=nullptr)
+        : QUndoCommand(parent),m_element(element),
+          m_before(element->elementInformations()),m_after(m_before) {
+        m_after.addValue(documentationReferenceKey(),reference,false);
+        m_after.addValue(QStringLiteral("comment"),comment);
+        m_after.addValue(QStringLiteral("function"),function);
+        m_after.addValue(QStringLiteral("description"),description);
+        setText(QObject::tr("Documentar borne sem mostrar texto no esquema"));
     }
     void redo() override { if(m_element)m_element->setElementInformations(m_after); }
     void undo() override { if(m_element)m_element->setElementInformations(m_before); }
@@ -351,69 +368,81 @@ inline bool terminalLike(Element *element) {
 }
 inline void setDocumentReferences(QWidget *parent,QETProject *project) {
     if(!project || project->isReadOnly() || !project->undoStack()) {
-        QMessageBox::warning(parent,QObject::tr("Referências de bornes"),
-            QObject::tr("Abra um projeto editável para documentar os bornes."));
+        QMessageBox::warning(parent,QObject::tr("Documentar bornes"),
+            QObject::tr("Abra um projeto editável."));
         return;
     }
     QList<Element *> selected;
-    for(Diagram *folio:project->diagrams()) {
-        if(!folio)continue;
-        for(Element *e:folio->elements())
-            if(e && e->isSelected() && terminalLike(e))
-                selected<<e;
-    }
+    for(Diagram *folio:project->diagrams())
+        if(folio)
+            for(Element *e:folio->elements())
+                if(e && e->isSelected() && terminalLike(e))selected<<e;
     if(selected.isEmpty()) {
-        QMessageBox::information(parent,QObject::tr("Referências de bornes"),
-            QObject::tr("Selecione um ou mais bornes no esquema. "
-                        "A operação NÃO gira os símbolos e NÃO exibe "
-                        "novos textos sobre eles."));
+        QMessageBox::information(parent,QObject::tr("Documentar bornes"),
+            QObject::tr("Selecione um ou mais bornes no esquema."));
         return;
     }
-    auto *batch=new QUndoCommand(QObject::tr(
-        "Referências documentais de bornes (sem legendas visíveis)"));
-    int edits=0;
+    auto *batch=new QUndoCommand(QObject::tr("Documentar bornes sem girar os textos"));
+    int changes=0;
     for(Element *element:selected) {
-        const QString old=documentedDesignator(element);
-        bool confirmed=false;
-        const QString input=QInputDialog::getText(parent,
-            QObject::tr("Referência documental do borne"),
-            QObject::tr("Identificação para as tabelas (p.ex., X4 ou X5). "
-                        "A legenda visível do elemento não será alterada."),
-            QLineEdit::Normal,old,&confirmed).trimmed();
-        if(!confirmed) {
-            // Discard the whole batch on cancel, rather than silently
-            // applying a partial set of names the user did not approve.
-            delete batch;
-            return;
+        const DiagramContext original=element->elementInformations();
+        const QString native=element->actualLabel().simplified();
+        QDialog dlg(parent);
+        dlg.setWindowTitle(QObject::tr("Dados do borne"));
+        auto *layout=new QVBoxLayout(&dlg);
+        auto *notice=new QLabel(QObject::tr(
+            "Identificação, Comentário, Função e Descrição textual para "
+            "as tabelas. Os dados não giram ou exibem texto no desenho."),&dlg);
+        notice->setWordWrap(true);
+        layout->addWidget(notice);
+        auto *form=new QFormLayout;
+        layout->addLayout(form);
+        auto *ref=new QLineEdit(documentedDesignator(element),&dlg);
+        ref->setObjectName(QStringLiteral("qet_terminal_doc_reference"));
+        auto *comment=new QLineEdit(infoText(original,QStringLiteral("comment")),&dlg);
+        auto *function=new QLineEdit(infoText(original,QStringLiteral("function")),&dlg);
+        auto *description=new QLineEdit(infoText(original,QStringLiteral("description")),&dlg);
+        form->addRow(QObject::tr("Legenda documental:"),ref);
+        form->addRow(QObject::tr("Comentário:"),comment);
+        form->addRow(QObject::tr("Função:"),function);
+        form->addRow(QObject::tr("Descrição textual:"),description);
+        if(!native.isEmpty())ref->setReadOnly(true);
+        auto *buttons=new QDialogButtonBox(
+            QDialogButtonBox::Ok|QDialogButtonBox::Cancel,&dlg);
+        layout->addWidget(buttons);
+        QObject::connect(buttons,&QDialogButtonBox::accepted,&dlg,&QDialog::accept);
+        QObject::connect(buttons,&QDialogButtonBox::rejected,&dlg,&QDialog::reject);
+        while(true) {
+            if(dlg.exec()!=QDialog::Accepted) {delete batch;return;}
+            const QString name=ref->text().trimmed();
+            if(name.isEmpty() || !QRegularExpression(QStringLiteral(
+                "^[A-Za-z][A-Za-z0-9._-]{0,39}$")).match(name).hasMatch()) {
+                QMessageBox::warning(&dlg,QObject::tr("Referência inválida"),
+                    QObject::tr("Informe uma referência como X4, X5 ou X1.2."));
+                continue;
+            }
+            const QString c=comment->text().trimmed();
+            const QString fn=function->text().trimmed();
+            const QString desc=description->text().trimmed();
+            const QString docRef=native.isEmpty()?name:
+                infoText(original,documentationReferenceKey());
+            if(docRef!=infoText(original,documentationReferenceKey()) ||
+               c!=infoText(original,QStringLiteral("comment")) ||
+               fn!=infoText(original,QStringLiteral("function")) ||
+               desc!=infoText(original,QStringLiteral("description"))) {
+                new SetDocumentReference(element,docRef,c,fn,desc,batch);
+                ++changes;
+            }
+            break;
         }
-        if(input.isEmpty() || input==old)continue;
-        if(!QRegularExpression(QStringLiteral(
-              "^[A-Za-z][A-Za-z0-9._-]{0,39}$")).match(input).hasMatch()) {
-            QMessageBox::warning(parent,QObject::tr("Referência inválida"),
-                QObject::tr("Use uma identificação como X4, X5 ou X1.2, "
-                            "sem espaços nem caracteres de controle."));
-            continue;
-        }
-        // Native labels are intentionally not overwritten: the user
-        // specifically wants upside-down terminal text left absent.
-        if(!element->actualLabel().simplified().isEmpty()) {
-            QMessageBox::information(parent,QObject::tr("Legenda existente"),
-                QObject::tr("Este borne já possui uma legenda nativa. "
-                            "Para evitar duas identificações conflitantes, "
-                            "essa entrada não foi alterada."));
-            continue;
-        }
-        new SetDocumentReference(element,input,batch);
-        ++edits;
     }
-    if(edits) {
+    if(changes) {
         project->undoStack()->push(batch);
         QMessageBox::information(parent,QObject::tr("Bornes documentados"),
-            QObject::tr("%1 referência(s) registrada(s) para a documentação, "
-                        "sem alterar posição, rotação ou legenda visível. "
-                        "A edição pode ser desfeita com Ctrl+Z. "
-                        "Salve o projeto para persistir os dados.")
-                .arg(edits));
+            QObject::tr("%1 borne(s) atualizado(s). Os campos são salvos "
+                        "no projeto, sem afetar a posição, a rotação "
+                        "ou a visibilidade dos textos dos símbolos.")
+                .arg(changes));
     } else delete batch;
 }
 inline void exportPdf(QWidget *parent,QETProject *project) {
