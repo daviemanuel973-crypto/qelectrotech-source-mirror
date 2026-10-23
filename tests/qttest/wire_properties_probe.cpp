@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QFile>
+#include <QDomDocument>
 #include <QFontDatabase>
 #include <QGraphicsPathItem>
 #include <QHash>
@@ -165,6 +166,18 @@ int main(int argc, char **argv) {
                     SymbolLegend::documentationReferenceKey()).toString()
                     ==QStringLiteral("X5"),
                 "documentation-only borne label was stored");
+        QDomDocument serialization(QStringLiteral("borne_info"));
+        QDomElement documentElement=serialization.createElement(
+            QStringLiteral("elementInformations"));
+        serialization.appendChild(documentElement);
+        documentedTerminal->elementInformations().toXml(
+            documentElement,QStringLiteral("elementInformation"));
+        DiagramContext restoredXml;
+        restoredXml.fromXml(documentElement,QStringLiteral("elementInformation"));
+        require(restoredXml.value(SymbolLegend::documentationReferenceKey())
+                    .toString()==QStringLiteral("X5") &&
+                !restoredXml.keyMustShow(SymbolLegend::documentationReferenceKey()),
+                "documentation-only X5 persists across QET XML round-trip without visible text");
         require(SymbolLegend::documentedDesignator(documentedTerminal)
                     ==QStringLiteral("X5"),
                 "empty native label is supplemented by documentary reference");
