@@ -10,7 +10,7 @@ diff --git a/sources/qetdiagrameditor.cpp b/sources/qetdiagrameditor.cpp
  #include "qetgraphicsitem/ViewItem/qetgraphicstableitem.h"
  #include "qetgraphicsitem/conductortextitem.h"
  #include "qetgraphicsitem/dynamicelementtextitem.h"
-@@ -1500,7 +1501,28 @@
+@@ -1500,7 +1501,32 @@
  	m_align_menu -> addSeparator();
  	m_align_menu -> addActions(m_align_actions_group.actions().mid(4));
  	menu_edition -> addSeparator();
@@ -35,6 +35,10 @@ diff --git a/sources/qetdiagrameditor.cpp b/sources/qetdiagrameditor.cpp
 +	QAction *graphic_legend = menu_edition->addAction(tr("Gerar simbologia gráfica e tabelas (PDF)..."));
 +	connect(graphic_legend, &QAction::triggered, this, [this]() {
 +		SymbolLegend::exportPdf(this, currentProject());
++	});
++	QAction *doc_bornes = menu_edition->addAction(tr("Identificar bornes na documentação (sem texto no desenho)..."));
++	connect(doc_bornes, &QAction::triggered, this, [this]() {
++		SymbolLegend::setDocumentReferences(this, currentProject());
 +	});
  	menu_edition -> addSeparator();
  	menu_edition -> addAction(m_edit_diagram_properties);
