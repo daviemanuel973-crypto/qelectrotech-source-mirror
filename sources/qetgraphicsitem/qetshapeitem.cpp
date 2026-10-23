@@ -709,8 +709,12 @@ void QetShapeItem::paint(
         const QRectF target=QRectF(m_P1,m_P2).normalized();
         if(bounds.width()>0. && bounds.height()>0.) {
             const qreal factor=std::min(target.width()/bounds.width(),target.height()/bounds.height());
-            painter->save();painter->translate(target.center());painter->scale(factor,factor);
-            painter->translate(-bounds.center());painter->drawPicture(QPointF(),m_documentaryVector);painter->restore();
+            painter->save();painter->translate(target.center());
+            painter->scale(factor*qreal(m_documentaryVector.logicalDpiX())/painter->device()->logicalDpiX(),
+                           factor*qreal(m_documentaryVector.logicalDpiY())/painter->device()->logicalDpiY());
+            painter->translate(-bounds.center().x()*painter->device()->logicalDpiX()/qreal(m_documentaryVector.logicalDpiX()),
+                               -bounds.center().y()*painter->device()->logicalDpiY()/qreal(m_documentaryVector.logicalDpiY()));
+            QPicture vector=m_documentaryVector;vector.play(painter);painter->restore();
         }
     } else painter->drawPath(outline());
 

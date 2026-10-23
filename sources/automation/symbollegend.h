@@ -32,6 +32,8 @@
 #include <QLabel>
 #include <QTableWidget>
 #include <QHeaderView>
+#include <QPicture>
+#include <QSignalBlocker>
 #include <algorithm>
 
 namespace SymbolLegend {
@@ -168,32 +170,45 @@ inline void cellText(QPainter &p,const QRect &r,const QString &value,
     p.save();
     QFont font(QStringLiteral("Arial"),pt);
     font.setBold(bold);
+    if(!(flags & Qt::TextWordWrap)) {
+        while(font.pointSize()>3 && QFontMetrics(font,p.device()).horizontalAdvance(value)>r.width()-10)
+            font.setPointSize(font.pointSize()-1);
+        if(QFontMetrics(font,p.device()).horizontalAdvance(value)>r.width()-10)
+            flags |= Qt::TextWrapAnywhere;
+    }
     p.setFont(font);
     p.setPen(Qt::black);
     p.drawText(r.adjusted(5,2,-5,-2),flags,
                value.isEmpty()?QStringLiteral("—"):value);
     p.restore();
 }
+inline QPicture symbolVector(Element *element) {
+    QPicture vector;if(!element)return vector;
+    const bool selected=element->isSelected();
+    const QSignalBlocker sceneSignals(element->scene());
+    element->setSelected(false);
+    QPainter recorder(&vector);element->paint(&recorder,nullptr,nullptr);recorder.end();
+    element->setSelected(selected);return vector;
+}
 inline void symbolImage(QPainter &p,Element *element,const QRect &box) {
-    if(!element) return;
-    QRectF bounds=element->boundingRect();
+    if(!element)return;
+    QPicture vector=symbolVector(element);
+    const QRectF bounds=vector.boundingRect();
     if(bounds.width()<=0.1 || bounds.height()<=0.1)return;
     const QRect target=box.adjusted(7,7,-7,-7);
     if(target.width()<3 || target.height()<3)return;
     const qreal scale=std::min(qreal(target.width())/bounds.width(),
                                qreal(target.height())/bounds.height());
-    p.save();
-    p.setClipRect(target);
-    p.translate(target.center());
-    p.scale(scale,scale);
-    p.translate(-bounds.center());
-    // Null option deliberately forces QET's full-detail QPicture:
-    // at PDF thumbnail scale some large symbols have no low-zoom cache,
-    // which would otherwise make the symbol cell appear EMPTY.
-    // Render actual native vector artwork, not a generic placeholder.
-    element->paint(&p,nullptr,nullptr);
-    p.restore();
+    p.save();p.setClipRect(target);p.translate(target.center());
+    p.scale(scale*qreal(vector.logicalDpiX())/p.device()->logicalDpiX(),
+            scale*qreal(vector.logicalDpiY())/p.device()->logicalDpiY());
+    p.translate(-bounds.center().x()*p.device()->logicalDpiX()/qreal(vector.logicalDpiX()),
+                -bounds.center().y()*p.device()->logicalDpiY()/qreal(vector.logicalDpiY()));
+    // QPicture playback rescales its coordinates to the output DPI.
+    // Compensate both scale and origin against the actual vector bounds.
+    vector.play(&p);p.restore();
 }
+
 inline void header(QPainter &p,const QRect &page,const QString &title,
                    const QString &projectTitle,int pageNo) {
     const QRect headline(page.left(),page.top(),page.width(),50);

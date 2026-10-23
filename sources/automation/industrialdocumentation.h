@@ -219,8 +219,7 @@ inline int createSheets(QETProject *project) {
             border(d,box);text(d,"SÍMBOLO    | LET. | DESCRIÇÃO",QRectF(box.x(),box.y(),346,20),true);
             text(d,r.abbreviation,QRectF(box.x()+77,box.y()+27,40,60),true);
             text(d,r.kind,QRectF(box.x()+120,box.y()+24,220,65));
-            QPicture vector;QPainter recorder(&vector);
-            r.symbol->paint(&recorder,nullptr,nullptr);recorder.end();
+            QPicture vector=SymbolLegend::symbolVector(r.symbol);
             auto *graphic=new QetShapeItem(QPointF(0,0),QPointF(60,58),QetShapeItem::Rectangle);
             graphic->setDocumentaryVector(vector);graphic->setPos(box.x()+8,box.y()+26);
             d->addItem(graphic);
