@@ -497,6 +497,14 @@ inline QString deviceBehaviour(const Element *element,const QString &pa,
        n.contains(QStringLiteral("rectifier")) ||
        n.contains(QStringLiteral("retificador")))
         return QStringLiteral("CONVERSÃO: não transmitir tensão/corrente entre domínios");
+    if((pa==QStringLiteral("A1") && pb==QStringLiteral("A2")) ||
+       n.contains(QStringLiteral("bobina")) ||
+       n.contains(QStringLiteral("coil")) ||
+       n.contains(QStringLiteral("motor")) ||
+       n.contains(QStringLiteral("lamp")) ||
+       n.contains(QStringLiteral("lâmpada")) ||
+       n.contains(QStringLiteral("resistor")))
+        return QStringLiteral("CARGA: entrada/saída do dispositivo, não continuidade de fio");
     if(n.contains(QStringLiteral("contact")) ||
        n.contains(QStringLiteral("contato")) ||
        n.contains(QStringLiteral("disjuntor")) ||
@@ -513,14 +521,6 @@ inline QString deviceBehaviour(const Element *element,const QString &pa,
        n.contains(QStringLiteral("contator")) ||
        n.contains(QStringLiteral("contactor")))
         return QStringLiteral("MANOBRA/PROTEÇÃO: estado do contato não verificado");
-    if((pa==QStringLiteral("A1") && pb==QStringLiteral("A2")) ||
-       n.contains(QStringLiteral("bobina")) ||
-       n.contains(QStringLiteral("coil")) ||
-       n.contains(QStringLiteral("motor")) ||
-       n.contains(QStringLiteral("lamp")) ||
-       n.contains(QStringLiteral("lâmpada")) ||
-       n.contains(QStringLiteral("resistor")))
-        return QStringLiteral("CARGA: entrada/saída do dispositivo, não continuidade de fio");
     return QStringLiteral("DISPOSITIVO: conexão interna não verificada");
 }
 
@@ -534,7 +534,8 @@ inline Snapshot scan(QETProject *project) {
     QSet<Conductor *> available;
     QList<Conductor *> allWires;
     for (Diagram *folio : allFolios) {
-        if (!folio) continue;
+        if (!folio || folio->border_and_titleblock.additionalFields()
+                .value(QStringLiteral("qet_generated_documentation")).toBool()) continue;
         ++snap.folios;
         const QList<Element *> elements=folio->elements();
         const QList<Conductor *> conductors=folio->conductors();
@@ -577,16 +578,37 @@ inline Snapshot scan(QETProject *project) {
     std::sort(allWires.begin(),allWires.end(),[](Conductor *a,Conductor *b){
         return a->uuid().toString()<b->uuid().toString();
     });
+    // Native queries can overlap (notably with directional report links).
+    // Partition their equivalence closure once; never insert a wire in two
+    // groups or let a later query overwrite its groupByConductor entry.
+    QHash<Conductor *, Conductor *> roots;
+    for (Conductor *wire : std::as_const(allWires)) roots.insert(wire,wire);
+    auto root = [&](Conductor *wire) {
+        Conductor *r=wire;
+        while (roots.value(r)!=r) r=roots.value(r);
+        while (wire!=r) {
+            Conductor *next=roots.value(wire);
+            roots[wire]=r;
+            wire=next;
+        }
+        return r;
+    };
+    for (Conductor *wire : std::as_const(allWires)) {
+        if(!wire->terminal1 || !wire->terminal2) continue;
+        const auto connected=wire->relatedPotentialConductors(true);
+        for (Conductor *member : connected) {
+            if(!available.contains(member)) continue;
+            Conductor *a=root(wire),*b=root(member);
+            if(a!=b) roots[b]=a;
+        }
+    }
+    QHash<Conductor *,QList<Conductor *>> partitions;
+    for (Conductor *wire : std::as_const(allWires))
+        partitions[root(wire)].append(wire);
     QSet<Conductor *> visited;
     for (Conductor *leader : std::as_const(allWires)) {
-        if (!leader || visited.contains(leader)) continue;
-        QSet<Conductor *> connected=leader->relatedPotentialConductors(true);
-        connected.insert(leader);
-        connected.intersect(available);
-        QList<Conductor *> members=connected.values();
-        std::sort(members.begin(),members.end(),[](Conductor *a,Conductor *b){
-            return a->uuid().toString()<b->uuid().toString();
-        });
+        if (visited.contains(leader)) continue;
+        const QList<Conductor *> members=partitions.value(root(leader));
         PotentialGroup group;
         const int groupId=snap.groups.size();
         for (Conductor *c : members) {
@@ -633,7 +655,8 @@ inline Snapshot scan(QETProject *project) {
     // the terminals of each component? This is an incidence graph, NEVER
     // a claim that a switch/contact is closed or a transformer is a wire.
     for (Diagram *folio : allFolios) {
-        if (!folio) continue;
+        if (!folio || folio->border_and_titleblock.additionalFields()
+                .value(QStringLiteral("qet_generated_documentation")).toBool()) continue;
         for (Element *element : folio->elements()) {
             if (!element) continue;
             QSet<int> adjacent;
@@ -673,7 +696,8 @@ inline Snapshot scan(QETProject *project) {
     // tracing past contactors, protectors and loads on subsequent sheets.
     QSet<QString> processedArrows;
     for(Diagram *folio:allFolios) {
-        if(!folio) continue;
+        if(!folio || folio->border_and_titleblock.additionalFields()
+                .value(QStringLiteral("qet_generated_documentation")).toBool()) continue;
         for(Element *e:folio->elements()) {
             if(!e) continue;
             const QList<Terminal *> pins=e->terminals();
@@ -765,6 +789,7 @@ inline Snapshot scan(QETProject *project) {
                 arc.page=QString::number(folio->folioIndex()+1);
                 arc.pinA=safeText(a->name());arc.pinB=safeText(b->name());
                 arc.behaviour=deviceBehaviour(e,pa,pb);
+                arc.traversable=arc.behaviour.startsWith(QStringLiteral("MANOBRA"));
                 snap.passages << arc;
             };
             int identifiedPairs=0;
@@ -818,6 +843,8 @@ inline Snapshot scan(QETProject *project) {
                                 if(snap.passages.size()>before) {
                                     snap.passages.last().behaviour=QStringLiteral(
                                         "COMUTADOR: via alternativa; posição do contato desconhecida");
+                                    snap.passages.last().traversable=false;
+                                    snap.passages.last().behaviour.prepend(QStringLiteral("INCERTO (geometria): "));
                                     ++snap.recoveredChangeoverPassages;
                                 }
                                 ++identifiedPairs;
@@ -829,7 +856,12 @@ inline Snapshot scan(QETProject *project) {
             if(pins.size()==6 && identifiedPairs==0) {
                 const auto geometricPairs=recoverThreePoleGeometry(e);
                 for(const auto &pr:geometricPairs) {
+                    const int before=snap.passages.size();
                     addPassage(pr.first,pr.second);
+                    if(snap.passages.size()>before) {
+                        snap.passages.last().traversable=false;
+                        snap.passages.last().behaviour.prepend(QStringLiteral("INCERTO (geometria): "));
+                    }
                     ++identifiedPairs;
                     ++snap.recoveredThreePolePassages;
                 }
@@ -839,6 +871,8 @@ inline Snapshot scan(QETProject *project) {
             if(pins.size()==2 && !identifiedPairs) {
                 ++identifiedPairs;
                 addPassage(pins.at(0),pins.at(1));
+                // Two terminals alone do not identify a contact or prove
+                // continuity: leave unknown devices/loads as boundaries.
             }
             if(pins.size()>2 && identifiedPairs==0 &&
                e->conductors().size()>1) {

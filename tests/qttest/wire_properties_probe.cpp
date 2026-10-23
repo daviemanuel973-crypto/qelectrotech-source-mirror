@@ -28,6 +28,7 @@
 #include "../../sources/QPropertyUndoCommand/qpropertyundocommand.h"
 #include "../../sources/automation/autowireproperties.h"
 #include "../../sources/automation/symbollegend.h"
+#include "../../sources/automation/industrialdocumentation.h"
 #include "../../sources/automation/wireprecalc.h"
 #include "../../sources/diagram.h"
 #include "../../sources/diagramcontent.h"
@@ -87,6 +88,12 @@ int main(int argc, char **argv) {
         }
         require(topology.folios==project.diagrams().size(),"all folios traversed");
         require(topology.wires==wires.size(),"every conductor was traced");
+        QSet<Conductor*> partition;
+        for(const auto &group:topology.groups)for(auto *member:group.conductors) {
+            require(!partition.contains(member),"overlapping native potentials cannot duplicate a physical wire");
+            partition.insert(member);
+        }
+        require(partition.size()==wires.size(),"potential partition covers every wire exactly once");
         require(topology.elements>0 && topology.terminals>0 && !topology.groups.isEmpty(),
                 "graph records symbols, terminals and electrical potentials");
         require(topology.componentConnections.size()==topology.elements,
@@ -268,7 +275,11 @@ int main(int argc, char **argv) {
         require(proposedPE.m_wire_section==wires.first()->properties().m_wire_section,
                 "PE section is never assigned from a generic load");
 
+        for(auto *c:wires)c->setSelected(false);
         const auto result=AutoWireProperties::apply(&project, calc);
+        std::printf("Classification counts: %d + %d + %d + %d + %d; wires=%d traceComplete=%d\n",
+            result.power,result.control,result.earth,result.neutral,result.unknown,int(wires.size()),int(result.traceComplete));
+        std::fflush(stdout);
         require(result.failed==0, "all requests verified after application");
         // No selection means no global sizing: multiple motors may have
         // different load currents and voltages even on the same panel.
@@ -503,6 +514,10 @@ int main(int argc, char **argv) {
                             // Submit only AFTER the queued picker has closed.
                             if (sawPicker && !dialogSubmitted) {
                                 dialogSubmitted=true;
+                                const auto fields=d->findChildren<QDoubleSpinBox*>();
+                                fields.at(0)->setValue(24.);fields.at(2)->setValue(.24);
+                                d->findChild<QDoubleSpinBox*>("qet_physical_length_m")->setValue(20.);
+                                d->findChild<QCheckBox*>("qet_profile_confirmed")->setChecked(true);
                                 const auto box=d->findChild<QDialogButtonBox*>();
                                 require(box && box->button(QDialogButtonBox::Ok)->isEnabled(),
                                         "trace-picked V/I/P dialog remains valid");
@@ -520,7 +535,7 @@ int main(int argc, char **argv) {
                                 "unsafe project-wide section setting is absent");
                         require(combos.at(2)->currentIndex()==0,
                                 "selected circuit is preselected for sizing");
-                        require(fields.size()==6,"all six electrical quantities shown");
+                        require(fields.size()==13,"load, physical length, correction and protection quantities shown");
                         combos.at(2)->setCurrentIndex(1);
                         for (QDoubleSpinBox *field : fields)
                             require(!field->isEnabled(),
@@ -544,6 +559,8 @@ int main(int argc, char **argv) {
                                 fields.at(3)->isEnabled() && fields.at(4)->isEnabled() &&
                                 fields.at(5)->isEnabled(),
                                 "electrical fields enabled when sizing is explicitly requested");
+                        d->findChild<QDoubleSpinBox*>("qet_physical_length_m")->setValue(20.);
+                        d->findChild<QCheckBox*>("qet_profile_confirmed")->setChecked(true);
                         // Check the former 10 W minimum bug: 24 V x
                         // 0.05 A x 0.85 = 1.02 W, not 10 W.
                         combos.at(0)->setCurrentIndex(0);
@@ -622,6 +639,26 @@ int main(int argc, char **argv) {
         std::fflush(stdout);
         require(!dialogTimedOut && sawDialog && sawPicker && sawResult,
                 "Qt trace picker, selected circuit sizing and completion succeeded");
+        const int originalFolios=reopened.diagrams().size();
+        const int originalWireCount=WireTrace::scan(&reopened).wires;
+        const int sheets=IndustrialDocumentation::createSheets(&reopened);
+        require(sheets>0 && reopened.diagrams().size()==originalFolios+sheets,
+                "native editable documentation sheets added");
+        require(WireTrace::scan(&reopened).wires==originalWireCount,
+                "documentation symbols do not contaminate electrical topology");
+        require(SymbolLegend::inventory(&reopened).elementsScanned==topology.elements,
+                "documentation symbol copies do not inflate BOM quantities");
+        reopened.undoStack()->undo();
+        require(reopened.diagrams().size()==originalFolios,"undo removes generated folios atomically");
+        reopened.undoStack()->redo();
+        require(reopened.diagrams().size()==originalFolios+sheets,"redo restores documentation");
+        const QString demoPath=QDir(QString::fromLocal8Bit(argv[3])).filePath("QET-Industrial-Demonstracao.qet");
+        reopened.setFilePath(demoPath);require(reopened.write().isOk(),"native documentation save");
+        QETProject documented(demoPath);require(documented.state()==QETProject::Ok,"native documentation reopens");
+        require(documented.diagrams().size()==originalFolios+sheets,"documentation survives reopen");
+        require(WireTrace::scan(&documented).wires==originalWireCount,"generated-folio marker survives XML");
+        require(IndustrialDocumentation::writePdf(&documented,QDir(QString::fromLocal8Bit(argv[3]))
+            .filePath("QET-Industrial-Documentacao.pdf")),"complete industrial PDF export");
         std::printf("PASS QET Qt dialog: voltage+power pair, trace picker, preview, apply, confirmation\n");
 
         std::printf("PASS QET graphic legend: %d distinct pictograms, %d devices, %d material rows, A3 PDF exported\\n",

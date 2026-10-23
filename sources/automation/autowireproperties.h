@@ -1,0 +1,793 @@
+/*
+ * QElectroTech - automatic educational power/control wire properties.
+ * Copyright 2026. Distributed under GPL-2.0-or-later, compatible with QET.
+ * This is a conservative heuristic, NOT electrical cable sizing.
+ * The user must validate current capacity, protection, installation and voltage drop.
+ */
+#ifndef QET_AUTOWIRE_PROPERTIES_H
+#define QET_AUTOWIRE_PROPERTIES_H
+
+#include "../QPropertyUndoCommand/qpropertyundocommand.h"
+#include "../diagramcontent.h"
+#include "../qetproject.h"
+#include "../qetgraphicsitem/conductor.h"
+#include "../qetgraphicsitem/element.h"
+#include "../qetgraphicsitem/terminal.h"
+#include "wireprecalc.h"
+#include "wiretrace.h"
+#include "electricaldata.h"
+#include <QMessageBox>
+#include <QScrollArea>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QFormLayout>
+#include <QVBoxLayout>
+#include <QComboBox>
+#include <QDoubleSpinBox>
+#include <QCheckBox>
+#include <QLabel>
+#include <QSignalBlocker>
+#include <QPushButton>
+#include <QListWidget>
+#include <QLineEdit>
+#include <QAbstractItemView>
+#include <QRegularExpression>
+#include <QVariant>
+#include <QStringList>
+#include <QHash>
+#include <QSet>
+#include <utility>
+#include <QUndoCommand>
+
+namespace AutoWireProperties {
+
+enum class Role { Unknown, Power, Control, Neutral, Earth };
+
+struct Result {
+    int power = 0;
+    int control = 0;
+    int neutral = 0;
+    int earth = 0;
+    int unknown = 0;
+    int modified = 0;
+    int kept = 0;
+    int verified = 0;
+    int failed = 0;
+    int inferredByPotential = 0;
+    int conflictingPotentials = 0;
+    int sizedConductors = 0;
+    int preservedOutOfScope = 0;
+    int tracedFolios = 0;
+    int tracedElements = 0;
+    int tracedTerminals = 0;
+    int tracedPotentials = 0;
+    bool traceComplete = false;
+    double proposedPowerSection = 0.;
+    QStringList details;
+};
+
+// Terminals marked A1/A2 are characteristic of contactor/relay coils.
+// Numeric terminals (1-2-3-4 etc.) are NOT phase labels.
+inline bool exactTerminalMark(const QString &mark, const QString &target) {
+    return mark.trimmed().compare(target, Qt::CaseInsensitive) == 0;
+}
+
+inline Role classify(const Conductor *c) {
+    if (!c || !c->terminal1 || !c->terminal2) return Role::Unknown;
+    const Terminal *ends[] = {c->terminal1, c->terminal2};
+    bool power = false;
+    bool control = false;
+    bool neutral = false;
+    bool earth = false;
+    for (const Terminal *t : ends) {
+        if (!t) continue;
+        const QString mark = t->name().trimmed();
+        if (exactTerminalMark(mark, QStringLiteral("PE")) ||
+            exactTerminalMark(mark, QStringLiteral("P.E."))) earth = true;
+        if (exactTerminalMark(mark, QStringLiteral("N"))) neutral = true;
+        if (exactTerminalMark(mark, QStringLiteral("A1")) ||
+            exactTerminalMark(mark, QStringLiteral("A2"))) control = true;
+        const Element *e = t->parentElement();
+        if (!e) continue;
+        const QString n = e->name().toLower();
+        // Auxiliary thermal contacts must not be classified as power.
+        const bool auxiliary =
+            n.contains(QStringLiteral("(no)")) ||
+            n.contains(QStringLiteral("(nc)")) ||
+            n.contains(QStringLiteral("auxiliar")) ||
+            n.contains(QStringLiteral("auxiliary"));
+        if (n.contains(QStringLiteral("contact power")) ||
+            n.contains(QStringLiteral("power contact")) ||
+            n.contains(QStringLiteral("contato de pot")) ||
+            n.contains(QStringLiteral("contato principal")) ||
+            n.contains(QStringLiteral("magneto-thermal circuit breaker gv")) ||
+            n.contains(QStringLiteral("disjuntor motor")) ||
+            n.contains(QStringLiteral("motor circuit breaker")) ||
+            (n.contains(QStringLiteral("thermal relay")) && !auxiliary) ||
+            (n.contains(QStringLiteral("relé térmico")) && !auxiliary) ||
+            (n.contains(QStringLiteral("rele termico")) && !auxiliary))
+            power = true;
+        if (n.contains(QStringLiteral("coil")) ||
+            n.contains(QStringLiteral("bobina")) ||
+            n.contains(QStringLiteral("light")) ||
+            n.contains(QStringLiteral("lâmpada")) ||
+            n.contains(QStringLiteral("lampada")) ||
+            n.contains(QStringLiteral("simple contact")) ||
+            n.contains(QStringLiteral("switch 3 positions")) ||
+            n.contains(QStringLiteral("selector")) ||
+            n.contains(QStringLiteral("botoeira")) ||
+            (n.contains(QStringLiteral("contact relais thermique"))) ||
+            auxiliary)
+            control = true;
+    }
+    // Existing explicit function is strong evidence, unlike the drawing colour.
+    // Respect it but never force a result when component evidence disagrees.
+    const QString declared = c->properties().m_function.trimmed().toUpper();
+    if (declared == QStringLiteral("PE") || declared == QStringLiteral("P.E.")) earth = true;
+    else if (declared == QStringLiteral("N")) neutral = true;
+    else if (declared == QStringLiteral("L1") ||
+             declared == QStringLiteral("L2") ||
+             declared == QStringLiteral("L3")) power = true;
+
+    // Legacy diagrams sometimes represent PE as a green (#00aa00)
+    // line connected to anonymous "i"/"Jump" terminals. Colour alone
+    // is a heuristic, not electrical proof, so reject conflicts with
+    // known power/control/neutral evidence; PE size stays unassigned.
+    const bool greenPeHint =
+        c->properties().color == QColor(QStringLiteral("#00aa00"))
+        && !power && !control && !neutral;
+    if (greenPeHint) earth = true;
+    // Conflicts and PE/N mixes must NOT be given a made-up profile.
+    if ((power && control) || (earth && (neutral || power || control)) ||
+        (neutral && power)) return Role::Unknown;
+    if (earth) return Role::Earth;
+    if (neutral) return Role::Neutral;
+    if (control) return Role::Control;
+    if (power) return Role::Power;
+    return Role::Unknown;
+}
+
+inline QString explicitFunction(const Conductor *c) {
+    // An L1/L2/L3 function is only inferred from an explicit terminal mark;
+    // numbering 1, 3, 5 on contactors is NOT a phase identification.
+    QString found;
+    if (!c) return found;
+    for (const Terminal *t : {c->terminal1, c->terminal2}) {
+        if (!t) continue;
+        QString m = t->name().trimmed().toUpper();
+        if (m == QStringLiteral("L1") || m == QStringLiteral("L2") ||
+            m == QStringLiteral("L3") || m == QStringLiteral("N") ||
+            m == QStringLiteral("PE")) {
+            if (!found.isEmpty() && m != found) return {};
+            found = m;
+        }
+    }
+    return found;
+}
+
+inline QString sectionText(double section) {
+    return QString::number(section, 'f', 1).replace('.', ',') + QStringLiteral(" mm²");
+}
+
+inline ConductorProperties proposal(const Conductor *c, Role role,
+                                    const QetWirePrecalc::Output &sizing,
+                                    bool overwrite, bool selectedCircuit) {
+    ConductorProperties props = c->properties();
+    // Only fill technical fields that are blank. Do not touch label, formula,
+    // text visibility, wire drawing colour, routing or geometry.
+    // A selected control circuit or as-yet-unclassified potential has its
+    // OWN measured/input electrical load. Never impose 1.5 mm2 after
+    // calculating a different section from actual V/I/P and length.
+    // No auto-section for protective earth (PE).
+    const double section = role == Role::Earth ? 0. : sizing.sectionMm2;
+    // The single V/I/P input describes ONE circuit, not every pump/feeder
+    // in the project. Never assign its section outside the chosen circuit.
+    if (selectedCircuit && section > 0. &&
+        (overwrite || props.m_wire_section.trimmed().isEmpty()))
+        props.m_wire_section = sectionText(section);
+
+    QString color;
+    if (role == Role::Power) color = QStringLiteral("Preto");
+    else if (role == Role::Control) color = QStringLiteral("Vermelho");
+    else if (role == Role::Neutral) color = QStringLiteral("Azul-claro");
+    else if (role == Role::Earth) color = QStringLiteral("Verde/amarelo");
+    if (!color.isEmpty() && ((overwrite && selectedCircuit) ||
+                             props.m_wire_color.trimmed().isEmpty()))
+        props.m_wire_color = color;
+
+    // The motor supply voltage is not necessarily the control voltage.
+    if (selectedCircuit && role != Role::Earth &&
+        (overwrite || props.m_tension_protocol.trimmed().isEmpty()))
+        props.m_tension_protocol = QString::number(sizing.voltage, 'f', 1) + QStringLiteral(" V");
+    if (props.m_function.trimmed().isEmpty()) {
+        const QString mark = explicitFunction(c);
+        if (!mark.isEmpty()) props.m_function = mark;
+        else if (role == Role::Earth &&
+                 props.color == QColor(QStringLiteral("#00aa00")))
+            props.m_function = QStringLiteral("PE");
+    }
+    // Fields assigned outside the selected circuit are limited to
+    // classification metadata; their size and voltage remain untouched.
+    return props;
+}
+
+inline Result apply(QETProject *project, const QetWirePrecalc::Output &sizing,
+                    bool overwrite = false, bool classificationOnly = false,
+                    const QSet<int> &chosenPotentials = {}) {
+    Result result;
+    if (!project || project->isReadOnly() || !project->undoStack() ||
+        (!classificationOnly && (!sizing.valid || !sizing.withinTable)))
+        return result;
+    // Always scan every page, element, terminal and conductor before
+    // deciding which electric potential may receive calculated metadata.
+    // A graph is a topology audit, not a source of guessed load currents.
+    const WireTrace::Snapshot trace = WireTrace::scan(project);
+    result.tracedFolios = trace.folios;
+    result.tracedElements = trace.elements;
+    result.tracedTerminals = trace.terminals;
+    result.tracedPotentials = trace.groups.size();
+    result.traceComplete = true; // Rechecked per selected potential below.
+    result.proposedPowerSection = sizing.sectionMm2;
+    QList<QPair<Conductor *, ConductorProperties>> expected;
+    QList<Conductor *> wires;
+    for (const WireTrace::PotentialGroup &group : trace.groups)
+        wires.append(group.conductors);
+
+    // Stage 1: direct evidence at components/terminals. A label or a
+    // drawing colour by itself does not establish a complete circuit.
+    QHash<Conductor *, Role> direct, resolved;
+    QSet<Conductor *> available;
+    QSet<Conductor *> selectedCircuit;
+    for (Conductor *c : wires) {
+        if (!c) continue;
+        available.insert(c);
+        direct.insert(c, classify(c));
+    }
+
+    // User-selected wires are explicit sizing targets. Include their exact
+    // continuous potentials, but NEVER cross a contactor, fuse, switch,
+    // motor or function-isolating terminal to another electrical circuit.
+    if (!chosenPotentials.isEmpty()) {
+        // An explicit trace-picker selection overrides graphical selection.
+        // Every candidate is a SINGLE potential, never an assumed whole
+        // motor circuit across a contactor, fuse or protection element.
+        for (int groupId : chosenPotentials) {
+            if (groupId < 0 || groupId >= trace.groups.size()) return result;
+            for (Conductor *member : trace.groups.at(groupId).conductors)
+                selectedCircuit.insert(member);
+        }
+    } else {
+        for (Conductor *c : wires) {
+            if (!c || !c->isSelected()) continue;
+            const int groupId = trace.groupByConductor.value(c, -1);
+            if (groupId < 0 || groupId >= trace.groups.size()) continue;
+            for (Conductor *member : trace.groups.at(groupId).conductors)
+                selectedCircuit.insert(member);
+        }
+    }
+    selectedCircuit.intersect(available);
+    // With no explicitly selected circuit, classify all wires but DO NOT
+    // dimension any. This is not a trace failure. Only a user-targeted
+    // invalid potential should abort the change.
+    if(!classificationOnly && !selectedCircuit.isEmpty()) {
+        for(Conductor *wire:selectedCircuit) {
+            const int id=trace.groupByConductor.value(wire,-1);
+            if(!trace.canSizeGroup(id)) {
+                result.traceComplete=false;
+                break;
+            }
+        }
+        if(!result.traceComplete) return result;
+    }
+    // A single motor load NEVER represents the whole panel. Global
+    // sizing has been removed: only explicitly selected potentials may
+    // receive a preliminary conductor section or voltage.
+    if (classificationOnly) selectedCircuit.clear();
+
+    // Stage 2: the QET engine already knows the *electrically continuous*
+    // groups. Propagate only if all classified members of the potential
+    // agree. relatedPotentialConductors respects function-isolating
+    // terminals and never crosses an ordinary device/contact/coil.
+    for (const WireTrace::PotentialGroup &group : trace.groups) {
+        Role agreed = Role::Unknown;
+        bool conflict = false;
+        for (Conductor *member : group.conductors) {
+            const Role seed = direct.value(member, Role::Unknown);
+            if (seed == Role::Unknown) continue;
+            if (agreed == Role::Unknown) agreed = seed;
+            else if (agreed != seed) conflict = true;
+        }
+        if (conflict) ++result.conflictingPotentials;
+        for (Conductor *member : group.conductors) {
+            const Role seed = direct.value(member, Role::Unknown);
+            // Do not propagate conflicting annotations along one potential.
+            const Role finalRole = conflict ? Role::Unknown :
+                                   (seed != Role::Unknown ? seed : agreed);
+            if (seed == Role::Unknown && finalRole != Role::Unknown)
+                ++result.inferredByPotential;
+            resolved.insert(member, finalRole);
+        }
+    }
+
+    auto *batch = new QUndoCommand(QObject::tr("Preencher propriedades de condutores (pré-dimensionamento)"));
+    for (Conductor *c : wires) {
+        if (!c) continue;
+        const Role role = resolved.value(c, Role::Unknown);
+        const bool inCircuit = selectedCircuit.contains(c);
+        switch (role) {
+            case Role::Power:   ++result.power; break;
+            case Role::Control: ++result.control; break;
+            case Role::Neutral: ++result.neutral; break;
+            case Role::Earth:   ++result.earth; break;
+            case Role::Unknown:
+                ++result.unknown;
+                // Unclassified is not "unsizeable": the user may select a
+                // specific, fully traced potential and supply its load data.
+                // Leave function/color untouched; size only chosen wires.
+                if(!inCircuit)continue;
+                break;
+        }
+        const ConductorProperties before = c->properties();
+        const ConductorProperties after = proposal(c, role, sizing, overwrite, inCircuit);
+        if (!inCircuit) ++result.preservedOutOfScope;
+        if (inCircuit && after.m_wire_section != before.m_wire_section)
+            ++result.sizedConductors;
+        if (before == after) { ++result.kept; continue; }
+        new QPropertyUndoCommand(c, "properties",
+                                 QVariant::fromValue(before),
+                                 QVariant::fromValue(after), batch);
+        expected.append(qMakePair(c, after));
+        ++result.modified;
+    }
+    if (result.modified) project->undoStack()->push(batch);
+    else delete batch;
+
+    // Verify that QElectroTech actually stored the technical properties.
+    for (const auto &item : expected) {
+        const ConductorProperties actual = item.first->properties();
+        const ConductorProperties &wanted = item.second;
+        const bool ok = actual.m_wire_section == wanted.m_wire_section &&
+                        actual.m_wire_color == wanted.m_wire_color &&
+                        actual.m_function == wanted.m_function &&
+                        actual.m_tension_protocol == wanted.m_tension_protocol;
+        if (ok) ++result.verified;
+        else ++result.failed;
+        result.details << QObject::tr("Fio %1 — seção: %2; cor: %3; função: %4 — %5")
+            .arg(item.first->uuid().toString(QUuid::WithoutBraces).left(8),
+                 actual.m_wire_section.isEmpty() ? QObject::tr("(vazia)") : actual.m_wire_section,
+                 actual.m_wire_color.isEmpty() ? QObject::tr("(vazia)") : actual.m_wire_color,
+                 actual.m_function.isEmpty() ? QObject::tr("(não definida)") : actual.m_function,
+                 ok ? QObject::tr("verificado") : QObject::tr("FALHA"));
+    }
+    return result;
+}
+
+
+inline void run(QWidget *parent, QETProject *project) {
+    if (!project) return;
+    if (project->isReadOnly()) {
+        QMessageBox::warning(parent, QObject::tr("Projeto somente leitura"),
+            QObject::tr("Abra uma cópia editável do projeto antes de aplicar as propriedades."));
+        return;
+    }
+
+    QDialog dialog(parent);
+    dialog.setWindowTitle(QObject::tr("Dimensionamento preliminar de condutores"));
+    dialog.resize(940,720);
+    auto *outer = new QVBoxLayout(&dialog);
+    auto *scroll=new QScrollArea(&dialog);scroll->setWidgetResizable(true);
+    auto *content=new QWidget(scroll);scroll->setWidget(content);outer->addWidget(scroll);
+    auto *layout = new QVBoxLayout(content);
+    // Explicit pre-flight audit, BEFORE entering an individual load.
+    const WireTrace::Snapshot preflight = WireTrace::scan(project);
+    auto *traceSummary = new QLabel(QObject::tr(
+        "RASTREAMENTO PRÉVIO: %1 páginas, %2 elementos, %3 terminais, "
+        "%4 fios, %5 potenciais (%6 atravessando páginas). "
+        "Integridade dos fios: %7. Setas problemáticas: %8. "
+        "Potenciais bloqueados: %9. "
+        "Consulte Editar → Rastrear conexões elétricas do projeto.")
+        .arg(preflight.folios).arg(preflight.elements)
+        .arg(preflight.terminals).arg(preflight.wires)
+        .arg(preflight.groups.size()).arg(preflight.multiFolioPotentials)
+        .arg(preflight.complete ? QObject::tr("cobertura completa") :
+                                 QObject::tr("há fios/terminais sem rastreio"))
+        .arg(preflight.unmatchedReports)
+        .arg(preflight.unsafeGroups.size()));
+    traceSummary->setWordWrap(true);
+    layout->addWidget(traceSummary);
+    auto *form = new QFormLayout;
+    layout->addLayout(form);
+    auto *supply = new QComboBox;
+    supply->addItems({QObject::tr("CA monofásico / dois fios"),
+                      QObject::tr("CA trifásico equilibrado (tensão entre fases)"),
+                      QObject::tr("CC dois fios (ex.: 24 Vcc)")});
+    supply->setCurrentIndex(1);
+    auto *pair = new QComboBox;
+    pair->addItems({QObject::tr("Conheço tensão e corrente"),
+                    QObject::tr("Conheço tensão e potência"),
+                    QObject::tr("Conheço corrente e potência")});
+    auto numeric = [&dialog](double initial, double low, double high, int decimals) {
+        auto *w = new QDoubleSpinBox(&dialog);
+        w->setDecimals(decimals);
+        w->setRange(low, high);
+        w->setValue(initial);
+        return w;
+    };
+    // Tiny control loads can have milliwatts or microamps; the former
+    // 0.01 kW minimum silently rounded computed watt values upward
+    // when switching from V+I to V+P. Higher precision prevents this.
+    auto *voltage = numeric(0., 0., 1000000., 6);
+    auto *current = numeric(0., 0., 1000000., 6);
+    auto *power = numeric(0., 0., 1000000., 9); // kW
+    auto *pf = numeric(0.85, 0.01, 1.0, 2);
+    auto *length = numeric(0., 0., 50000., 2);
+    auto *drop = numeric(4., 0.1, 15., 1);
+    voltage->setSuffix(QObject::tr(" V"));
+    current->setSuffix(QObject::tr(" A"));
+    power->setSuffix(QObject::tr(" kW (potência elétrica ativa)"));
+    length->setObjectName("qet_physical_length_m");
+    length->setSuffix(QObject::tr(" m"));
+    drop->setSuffix(QStringLiteral(" %"));
+    form->addRow(QObject::tr("Alimentação:"), supply);
+    form->addRow(QObject::tr("Informações conhecidas:"), pair);
+    form->addRow(QObject::tr("Tensão entre condutores / fases:"), voltage);
+    form->addRow(QObject::tr("Corrente da carga:"), current);
+    form->addRow(QObject::tr("Potência elétrica ativa:"), power);
+    form->addRow(QObject::tr("Fator de potência (cos φ):"), pf);
+    form->addRow(QObject::tr("Comprimento de ida do circuito:"), length);
+    form->addRow(QObject::tr("Queda máxima admitida:"), drop);
+    auto *temperature=numeric(1.,0.01,2.,3);
+    auto *grouping=numeric(1.,0.01,1.,3);
+    auto *protection=numeric(0.,0.,100000.,3);
+    auto *trip=numeric(0.,0.,100000.,3);
+    auto *fault=numeric(0.,0.,1000000.,2);
+    auto *clearing=numeric(0.,0.,5.,4);
+    auto *k=numeric(0.,0.,1000.,2);
+    form->addRow(QObject::tr("Fator de correção por temperatura:"),temperature);
+    form->addRow(QObject::tr("Fator de correção por agrupamento:"),grouping);
+    form->addRow(QObject::tr("Proteção In (0 = pendente):"),protection);
+    form->addRow(QObject::tr("Corrente convencional I2 (0 = pendente):"),trip);
+    form->addRow(QObject::tr("Curto-circuito A (0 = pendente):"),fault);
+    form->addRow(QObject::tr("Tempo de eliminação s:"),clearing);
+    form->addRow(QObject::tr("Constante adiabática k:"),k);
+    auto *profileConfirmed=new QCheckBox(QObject::tr(
+        "Confirmo cobre/PVC 70 °C, B1, condutores carregados conforme alimentação, e fatores declarados"));
+    profileConfirmed->setObjectName("qet_profile_confirmed");
+    layout->addWidget(profileConfirmed);
+    int selectedWires = 0;
+    for (Diagram *d : project->diagrams())
+        if (d)
+            for (Conductor *c : DiagramContent(d, false).conductors())
+                if (c && c->isSelected()) ++selectedWires;
+    QSet<int> chosenPotentials;
+    auto *scope = new QComboBox;
+    scope->addItem(QObject::tr("Dimensionar potenciais escolhidos no rastreador ou no desenho"));
+    scope->addItem(QObject::tr("Apenas identificar fios, sem dimensionar"));
+    if (!selectedWires) scope->setCurrentIndex(1);
+    form->addRow(QObject::tr("Escopo do cálculo:"), scope);
+    auto *choosePotentialBtn = new QPushButton(
+        QObject::tr("Escolher fios pelo rastreador (páginas, elementos e potenciais)..."), &dialog);
+    choosePotentialBtn->setObjectName(QStringLiteral("qet_pick_trace_potentials"));
+    layout->addWidget(choosePotentialBtn);
+    auto *scopeHelp = new QLabel(&dialog);
+    auto updateScopeHelp = [&]() {
+        if (scope->currentIndex() == 1)
+            scopeHelp->setText(QObject::tr(
+                "MODO IDENTIFICAÇÃO: NÃO dimensiona. Para escolher os fios sem "
+                "selecioná-los no desenho, clique em 'Escolher fios pelo rastreador'."));
+        else if (scope->currentIndex() == 0)
+            scopeHelp->setText(QObject::tr(
+                "Fios selecionados no desenho: %1 | Potenciais escolhidos no rastreador: %2. "
+                "Escolha APENAS os potenciais da mesma carga; não agrupe alimentadores "
+                "e comandos com correntes diferentes.")
+                .arg(selectedWires).arg(chosenPotentials.size()));
+    };
+    scopeHelp->setWordWrap(true);
+    layout->addWidget(scopeHelp);
+    auto *overwrite = new QCheckBox(QObject::tr(
+        "Sobrescrever propriedades já preenchidas APENAS no circuito dimensionado"));
+    layout->addWidget(overwrite);
+    auto *preview = new QLabel;
+    preview->setWordWrap(true);
+    layout->addWidget(preview);
+    auto *note = new QLabel(QObject::tr(
+        "PRÉ-DIMENSIONAMENTO DIDÁTICO: cobre/PVC 70 °C, método B1, 30 °C, "
+        "sem agrupamento. Não verifica proteção, partida de motor ou todas as "
+        "exigências da NBR 5410. PE não recebe bitola automática. "
+        "Para potência mecânica de placa de motor, é necessário considerar "
+        "o rendimento (η). Em CC o fator de potência é ignorado."));
+    note->setWordWrap(true);
+    layout->addWidget(note);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    layout->addWidget(buttons);
+    QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+    QetWirePrecalc::Output latest;
+    auto refresh = [&]() {
+        const int known = pair->currentIndex();
+        const bool onlyIdentify = scope->currentIndex() == 1;
+        // The old dialog accepted electrical inputs while ignoring them:
+        // disable them visibly in classification-only mode.
+        updateScopeHelp();
+        supply->setEnabled(!onlyIdentify);
+        pair->setEnabled(!onlyIdentify);
+        voltage->setEnabled(!onlyIdentify && known != 2);
+        current->setEnabled(!onlyIdentify && known != 1);
+        power->setEnabled(!onlyIdentify && known != 0);
+        pf->setEnabled(!onlyIdentify && supply->currentIndex() != 2);
+        length->setEnabled(!onlyIdentify);
+        drop->setEnabled(!onlyIdentify);
+        for(auto *w:{temperature,grouping,protection,trip,fault,clearing,k})w->setEnabled(!onlyIdentify);
+        profileConfirmed->setEnabled(!onlyIdentify);
+        overwrite->setEnabled(!onlyIdentify);
+        QetWirePrecalc::Input input;
+        input.supply = supply->currentIndex() == 2 ? QetWirePrecalc::Supply::DC :
+                       supply->currentIndex() == 1 ? QetWirePrecalc::Supply::ThreePhase :
+                                                     QetWirePrecalc::Supply::TwoWire;
+        input.known = known == 0 ? QetWirePrecalc::KnownPair::VoltageCurrent :
+                      known == 1 ? QetWirePrecalc::KnownPair::VoltagePower :
+                                   QetWirePrecalc::KnownPair::CurrentPower;
+        input.voltage = voltage->value();
+        input.current = current->value();
+        input.power = power->value() * 1000.;
+        input.powerFactor = pf->value();
+        input.lengthMeters = length->value();
+        input.maxDropPercent = drop->value();
+        input.temperatureFactor=temperature->value();input.groupingFactor=grouping->value();
+        input.protectionCurrent=protection->value();input.conventionalTripCurrent=trip->value();
+        input.faultCurrent=fault->value();input.clearingSeconds=clearing->value();input.adiabaticK=k->value();
+        latest = QetWirePrecalc::calculate(input);
+        if (latest.valid) {
+            if (known == 0) { QSignalBlocker b(power); power->setValue(latest.power / 1000.); }
+            if (known == 1) { QSignalBlocker b(current); current->setValue(latest.current); }
+            if (known == 2) { QSignalBlocker b(voltage); voltage->setValue(latest.voltage); }
+        }
+        // Prevent Qt spin boxes from silently clipping an out-of-range
+        // computed quantity. A clipped value could become an unintended
+        // input when the user changes the known-pair selector.
+        const bool outputFits = latest.valid &&
+            (known != 0 || (latest.power / 1000. >= power->minimum() &&
+                            latest.power / 1000. <= power->maximum())) &&
+            (known != 1 || (latest.current >= current->minimum() &&
+                            latest.current <= current->maximum())) &&
+            (known != 2 || (latest.voltage >= voltage->minimum() &&
+                            latest.voltage <= voltage->maximum()));
+        const bool wantsSizing = scope->currentIndex() != 1;
+        const bool hasCircuit = selectedWires > 0 || !chosenPotentials.isEmpty();
+        QSet<int> sizingGroups=chosenPotentials;
+        if(sizingGroups.isEmpty()) {
+            for(const WireTrace::PotentialGroup &group:preflight.groups)
+                for(Conductor *wire:group.conductors)
+                    if(wire && wire->isSelected()) {
+                        sizingGroups.insert(preflight.groupByConductor.value(wire,-1));
+                        break;
+                    }
+        }
+        bool selectedTraceSafe=hasCircuit;
+        for(int id:sizingGroups)
+            if(!preflight.canSizeGroup(id)) selectedTraceSafe=false;
+        // Classifying a diagram is independent of the motor current.
+        // Invalid sizing must never disable classification-only mode.
+        const bool ok = scope->currentIndex() == 1 ||
+                        (profileConfirmed->isChecked() && selectedTraceSafe && latest.valid &&
+                         latest.withinTable && outputFits &&
+                         (!wantsSizing || hasCircuit));
+        buttons->button(QDialogButtonBox::Ok)->setEnabled(ok);
+        if (scope->currentIndex() == 1)
+            preview->setText(QObject::tr(
+                "IDENTIFICAÇÃO APENAS: os valores de tensão, corrente e potência "
+                "NÃO SERÃO USADOS. Use o seletor de potenciais rastreados "
+                "para dimensionar sem caçar fios manualmente no desenho."));
+        else if(!selectedTraceSafe)
+            preview->setText(QObject::tr(
+                "Nenhum potencial seguro selecionado, ou a seleção contém "
+                "uma ligação inconsistente entre fios/setas. Confira o rastreamento."));
+        else if(!profileConfirmed->isChecked())preview->setText(QObject::tr("Confirme as condições do perfil antes de aplicar."));
+        else if (!latest.valid) preview->setText(QObject::tr("PENDENTE: informe tensão/corrente ou potência, comprimento físico e dados coerentes de proteção/curto."));
+        else if (!latest.withinTable)
+            preview->setText(QObject::tr("Corrente ou queda de tensão fora da tabela preliminar até 120 mm²."));
+        else if (!outputFits)
+            preview->setText(QObject::tr("Resultado fora da faixa permitida no campo calculado; reduza os valores."));
+        else preview->setText(QObject::tr(
+            "Resultado: %1 V / %2 A / %3 kW; seção PRELIMINAR de força: %4; "
+            "queda aproximada: %5%. %6")
+                .arg(latest.voltage, 0, 'f', 1).arg(latest.current, 0, 'f', 2)
+                .arg(latest.power / 1000., 0, 'f', 3)
+                .arg(sectionText(latest.sectionMm2))
+                .arg(latest.dropPercent, 0, 'f', 2)
+                .arg(supply->currentIndex() == 2
+                    ? QObject::tr("CC: cos φ não é aplicado. Seção/tensão somente nos fios selecionados.")
+                    : QObject::tr(
+                        "Seção/tensão somente nos potenciais selecionados; "
+                        "outras cargas não recebem este dimensionamento.")));
+    };
+    auto loadDeclared=[&]() {
+        QSet<int> groups=chosenPotentials;
+        if(groups.isEmpty())for(auto *wire:preflight.groupByConductor.keys())
+            if(wire && wire->isSelected())groups.insert(preflight.groupByConductor.value(wire));
+        const auto loads=ElectricalData::loads(preflight,groups);
+        if(loads.size()!=1)return;
+        const auto info=(*loads.begin())->elementInformations();
+        auto read=[&](const QString&key,QDoubleSpinBox*field,double divisor=1.) {
+            bool ok=false;QString str=info.value(key).toString();const double v=str.replace(',','.').toDouble(&ok);
+            if(ok && v>0.){QSignalBlocker block(field);field->setValue(v/divisor);}
+        };
+        read("qet_voltage_v",voltage);read("qet_current_a",current);read("qet_power_w",power,1000.);
+        read("qet_power_factor",pf);read("qet_circuit_length_m",length);
+        read("qet_temperature_factor",temperature);read("qet_grouping_factor",grouping);
+        read("qet_protection_a",protection);read("qet_trip_i2_a",trip);
+        read("qet_fault_a",fault);read("qet_clearing_s",clearing);read("qet_adiabatic_k",k);
+        const QString kind=info.value("qet_supply").toString();
+        {QSignalBlocker block(supply);if(kind=="CC")supply->setCurrentIndex(2);
+         else if(kind=="1F")supply->setCurrentIndex(0);else if(kind=="3F")supply->setCurrentIndex(1);}
+        {QSignalBlocker block(pair);if(current->value()<=0. && power->value()>0.)pair->setCurrentIndex(1);}
+    };
+    QObject::connect(choosePotentialBtn, &QPushButton::clicked, &dialog, [&]() {
+        // Select from the preflight graph, not from an ungrounded global load.
+        QDialog selector(&dialog);
+        selector.setWindowTitle(QObject::tr("Selecionar potenciais do mesmo circuito"));
+        selector.resize(860, 560);
+        auto *selLayout = new QVBoxLayout(&selector);
+        auto *notice = new QLabel(QObject::tr(
+            "Cada linha é um potencial contínuo. Você pode escolher vários "
+            "potenciais (por exemplo, L1/L2/L3 do mesmo motor), mas a "
+            "continuidade NÃO prova que possuem a mesma carga ou corrente. "
+            "Confirme a alimentação e os dispositivos antes de aplicar."), &selector);
+        notice->setWordWrap(true);
+        selLayout->addWidget(notice);
+        auto *filter = new QLineEdit(&selector);
+        filter->setPlaceholderText(QObject::tr(
+            "Filtrar por página, número do potencial, elemento ou identificação..."));
+        selLayout->addWidget(filter);
+        auto *potentialList = new QListWidget(&selector);
+        potentialList->setObjectName(QStringLiteral("qet_trace_potential_list"));
+        potentialList->setSelectionMode(QAbstractItemView::ExtendedSelection);
+        for (int i=0; i<preflight.groups.size(); ++i) {
+            auto *item = new QListWidgetItem(preflight.potentialSummary(i), potentialList);
+            item->setData(Qt::UserRole, i);
+            if (chosenPotentials.contains(i)) item->setSelected(true);
+        }
+        QObject::connect(filter, &QLineEdit::textChanged, &selector,
+            [potentialList](const QString &term) {
+                for (int i=0;i<potentialList->count();++i) {
+                    auto *item=potentialList->item(i);
+                    item->setHidden(!item->text().contains(term,Qt::CaseInsensitive));
+                }
+            });
+        selLayout->addWidget(potentialList);
+        auto *selButtons = new QDialogButtonBox(
+            QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &selector);
+        selLayout->addWidget(selButtons);
+        QObject::connect(selButtons, &QDialogButtonBox::accepted, &selector, &QDialog::accept);
+        QObject::connect(selButtons, &QDialogButtonBox::rejected, &selector, &QDialog::reject);
+        if (selector.exec() != QDialog::Accepted) return;
+        QSet<int> requestedGroups;
+        for (QListWidgetItem *item : potentialList->selectedItems())
+            requestedGroups.insert(item->data(Qt::UserRole).toInt());
+        if (requestedGroups.size()>1 &&
+            QMessageBox::warning(&dialog,
+                QObject::tr("Confirmar potenciais da mesma carga"),
+                QObject::tr("Você selecionou %1 potenciais. O rastreamento "
+                            "NÃO comprova que eles pertencem à mesma carga. "
+                            "Confirme que todas as fases/trechos selecionados "
+                            "usam a MESMA corrente nominal, tensão, comprimento "
+                            "e condições de instalação antes de continuar.")
+                    .arg(requestedGroups.size()),
+                QMessageBox::Yes | QMessageBox::No,
+                QMessageBox::No)!=QMessageBox::Yes)
+            return;
+        chosenPotentials=requestedGroups;
+        // Never reuse another load's values after changing the selected circuit.
+        voltage->setValue(0.);current->setValue(0.);power->setValue(0.);length->setValue(0.);
+        profileConfirmed->setChecked(false);loadDeclared();
+        if (!chosenPotentials.isEmpty()) scope->setCurrentIndex(0);
+        else if (!selectedWires) scope->setCurrentIndex(1);
+        refresh();
+    });
+    QObject::connect(supply, QOverload<int>::of(&QComboBox::currentIndexChanged), &dialog, refresh);
+    QObject::connect(pair, QOverload<int>::of(&QComboBox::currentIndexChanged), &dialog, refresh);
+    QObject::connect(scope, QOverload<int>::of(&QComboBox::currentIndexChanged), &dialog, refresh);
+    for (QDoubleSpinBox *w : {voltage, current, power, pf, length, drop,temperature,grouping,protection,trip,fault,clearing,k})
+        QObject::connect(w, QOverload<double>::of(&QDoubleSpinBox::valueChanged), &dialog, refresh);
+    QObject::connect(profileConfirmed,&QCheckBox::toggled,&dialog,refresh);
+    loadDeclared();refresh();
+    if (dialog.exec() != QDialog::Accepted) return;
+    // The data are derived again from the final widget values.
+    refresh();
+    const bool classificationOnly = scope->currentIndex() == 1;
+    if (!classificationOnly && (!latest.valid || !latest.withinTable)) return;
+    // Without electrical data for every load, global sizing is unsafe.
+    // Index 1 is classification only; other circuits remain untouched.
+    const Result r = apply(project, latest, overwrite->isChecked(),
+                           classificationOnly, chosenPotentials);
+    if (!r.traceComplete && !classificationOnly) {
+        QMessageBox::warning(parent, QObject::tr("Rastreamento incompleto"),
+            QObject::tr("O potencial escolhido contém ligação inválida ou "
+                        "seta sem par. Este circuito foi bloqueado; os demais "
+                        "continuam disponíveis. Confira Editar → "
+                        "Rastrear conexões elétricas do projeto."));
+        return;
+    }
+    QMessageBox message(QMessageBox::Information,
+        classificationOnly ? QObject::tr("Identificação de fios concluída")
+                           : QObject::tr("Pré-dimensionamento aplicado"),
+        QObject::tr("Seção de força sugerida: %1\n"
+                    "Força: %2 | Comando: %3 | Neutro: %4 | PE: %5\n"
+                    "Não classificados: %6 | Atualizados: %7 | Sem alteração: %8\n"
+                    "Gravações verificadas: %9 | Falhas de gravação: %10\n"
+                    "Classificados pela continuidade elétrica: %11\n"
+                    "Grupos com evidências conflitantes: %12\n"
+                    "Bitolas atribuídas no escopo: %13\n"
+                    "Fios classificados fora do escopo de bitola: %14\n"
+                    "Rastreamento: %15 páginas, %16 elementos, %17 terminais, %18 potenciais\n\n"
+                    "Abra Editar → Rastrear conexões elétricas do projeto para conferir.")
+            .arg(classificationOnly ? QObject::tr("não aplicada") :
+                                       sectionText(r.proposedPowerSection))
+            .arg(r.power).arg(r.control).arg(r.neutral).arg(r.earth)
+            .arg(r.unknown).arg(r.modified).arg(r.kept).arg(r.verified).arg(r.failed)
+            .arg(r.inferredByPotential).arg(r.conflictingPotentials)
+            .arg(r.sizedConductors).arg(r.preservedOutOfScope)
+            .arg(r.tracedFolios).arg(r.tracedElements).arg(r.tracedTerminals)
+            .arg(r.tracedPotentials),
+        QMessageBox::Ok, parent);
+    if (r.failed) message.setIcon(QMessageBox::Warning);
+    if (!r.details.isEmpty()) message.setDetailedText(r.details.join(QStringLiteral("\n")));
+    message.exec();
+}
+
+inline void showReport(QWidget *parent, QETProject *project) {
+    if (!project) return;
+    QStringList lines;
+    int count = 0;
+    int blankSection = 0;
+    int blankColor = 0;
+    int blankFunction = 0;
+    int blankVoltage = 0;
+    int blankSectionAndColor = 0;
+    for (Diagram *d : project->diagrams()) {
+        if (!d) continue;
+        for (Conductor *c : DiagramContent(d, false).conductors()) {
+            if (!c) continue;
+            ++count;
+            const ConductorProperties p = c->properties();
+            const bool noSection = p.m_wire_section.trimmed().isEmpty();
+            const bool noColor = p.m_wire_color.trimmed().isEmpty();
+            const bool noFunction = p.m_function.trimmed().isEmpty();
+            const bool noVoltage = p.m_tension_protocol.trimmed().isEmpty();
+            if (noSection) ++blankSection;
+            if (noColor) ++blankColor;
+            if (noFunction) ++blankFunction;
+            if (noVoltage) ++blankVoltage;
+            if (noSection && noColor) ++blankSectionAndColor;
+            lines << QObject::tr("Fio %1 | Seção: %2 | Cor: %3 | Função: %4 | Tensão: %5")
+                .arg(c->uuid().toString(QUuid::WithoutBraces).left(8),
+                     noSection ? QObject::tr("(vazia)") : p.m_wire_section,
+                     noColor ? QObject::tr("(vazia)") : p.m_wire_color,
+                     noFunction ? QObject::tr("(vazia)") : p.m_function,
+                     noVoltage ? QObject::tr("(vazia)") : p.m_tension_protocol);
+        }
+    }
+    QMessageBox box(QMessageBox::Information, QObject::tr("Características dos fios"),
+        QObject::tr(
+            "Total de fios: %1\n"
+            "Sem seção: %2\n"
+            "Sem cor técnica: %3\n"
+            "Sem função: %4\n"
+            "Sem tensão/protocolo: %5\n"
+            "Sem seção E cor: %6\n\n"
+            "ATENÇÃO: classe força/comando não identifica automaticamente "
+            "fase L1/L2/L3 nem a tensão efetiva em outro circuito. "
+            "O campo Função pode permanecer vazio por falta de evidência. "
+            "Classificar um fio não dimensiona seu cabo. "
+            "Abra 'Mostrar detalhes' para conferir "
+            "cada campo armazenado.")
+            .arg(count).arg(blankSection).arg(blankColor)
+            .arg(blankFunction).arg(blankVoltage).arg(blankSectionAndColor),
+        QMessageBox::Ok, parent);
+    box.setDetailedText(lines.join(QStringLiteral("\n")));
+    box.exec();
+}
+
+} // namespace AutoWireProperties
+#endif // QET_AUTOWIRE_PROPERTIES_H

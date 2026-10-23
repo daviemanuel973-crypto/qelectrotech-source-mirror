@@ -47,26 +47,12 @@ jobs:
             mingw-w64-ucrt-x86_64-angleproject
             mingw-w64-ucrt-x86_64-qt6-declarative
 
-      - name: Aplicar alteracao nativa de identificacao de fios
+      - name: Conferir integração nativa
         shell: msys2 {0}
         run: |
-          set -euo pipefail
-          cd "$GITHUB_WORKSPACE"
-          # Checkout Windows may convert LF -> CRLF for text patches.
-          # Remove only the carriage return at line endings, then check
-          # patch context without misclassifying CR as trailing whitespace.
-          sed -i 's/\r$//' qet-native-forca-comando.patch
-          sed -i 's/\r$//' sources/qetdiagrameditor.cpp sources/qetgraphicsitem/conductor.cpp
-          git apply --ignore-whitespace --whitespace=nowarn --check qet-native-forca-comando.patch
-          git apply --ignore-whitespace --whitespace=nowarn qet-native-forca-comando.patch
+          test -s sources/automation/autowireproperties.h
           grep -q 'AutoWireProperties::run' sources/qetdiagrameditor.cpp
-          grep -q 'AutoWireProperties::showReport' sources/qetdiagrameditor.cpp
-          grep -q 'QetWirePrecalc::calculate' sources/automation/autowireproperties.h
-          grep -q 'selectedCircuit' sources/automation/autowireproperties.h
-          grep -q 'classificationOnly' sources/automation/autowireproperties.h
-          grep -q 'section = 0.;' sources/automation/autowireproperties.h
-          grep -q 'Gravações verificadas' sources/automation/autowireproperties.h
-          echo 'Patch REV2 com relatorio e verificacao integrado ao menu Editar.'
+          grep -q 'IndustrialDocumentation::generateSheets' sources/qetdiagrameditor.cpp
 
       - name: Testar os calculos C++ isoladamente
         shell: msys2 {0}
@@ -89,7 +75,7 @@ jobs:
             -DQT_VERSION_MAJOR=6 \
             -DBUILD_WITH_KF=ON \
             -DBUILD_KF=OFF \
-            -DPACKAGE_TESTS=OFF \
+            -DPACKAGE_TESTS=ON \
             -DCMAKE_POLICY_DEFAULT_CMP0077=NEW \
             -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
             -DQET_EXPORT_PROJECT_DB=ON \
@@ -126,7 +112,7 @@ jobs:
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE/build"
-          ctest --output-on-failure --timeout 300
+          ctest --output-on-failure --timeout 300 --no-tests=error
 
       - name: Gerar pasta portatil Windows com dependencias
         if: ${{ always() && steps.compilacao.outcome == 'success' }}
@@ -158,7 +144,10 @@ jobs:
           cp -r "$GITHUB_WORKSPACE/titleblocks" "$DEST/titleblocks"
           cp -r "$GITHUB_WORKSPACE/fonts" "$DEST/fonts" || true
           cp -r "$GITHUB_WORKSPACE/examples" "$DEST/examples" || true
-          cp "$GITHUB_WORKSPACE/misc/Lancer QET_qt6.bat" "$DEST/Abrir QElectroTech.bat"
+          cp "$GITHUB_WORKSPACE/misc/Abrir-QET-Industrial.bat" "$DEST/Abrir QElectroTech.bat"
+          mkdir -p "$DEST/validation" "$DEST/documentacao"
+          cp "$GITHUB_WORKSPACE/build/lazy-folios/results.txt" "$DEST/validation/" 2>/dev/null || true
+          cp "$GITHUB_WORKSPACE/build/lazy-folios/"QET-Industrial-* "$DEST/documentacao/" 2>/dev/null || true
           find "$GITHUB_WORKSPACE/build/lang" -maxdepth 1 -name 'qet_*.qm' -exec cp {} "$DEST/lang/" \; 2>/dev/null || true
           for file in "$GITHUB_WORKSPACE"/LICENSE* "$GITHUB_WORKSPACE"/ELEMENTS.LICENSE; do
             test -f "$file" && cp "$file" "$DEST/" || true
@@ -166,7 +155,9 @@ jobs:
           test -s "$DEST/bin/QElectroTech.exe"
           test -d "$DEST/elements"
           printf 'QElectroTech em desenvolvimento - fonte: feature/dados-eletricos-dimensionamento\nCommit: %s\nAções: Documentar bornes; Gerar simbologia gráfica e tabelas; Dimensionamento preliminar de condutores; Rastrear circuitos e setas entre folhas.\nAVISO: pacote compilado; NÃO significa que os testes passaram. Confira os resultados do job no GitHub Actions. O cálculo NÃO substitui NBR 5410 nem revisão profissional.\n' "$(git rev-parse HEAD)" > "$DEST/LEIA-ME-STATUS-VALIDACAO.txt"
-          echo 'Pacote REV2 preparado.'
+          cd "$GITHUB_WORKSPACE"
+          python3 misc/verify_windows_portable.py "$DEST"
+          echo 'Pacote preparado e inicialização isolada verificada.'
 
       - name: Disponibilizar download do aplicativo Windows
         if: ${{ always() && steps.compilacao.outcome == 'success' }}
@@ -175,31 +166,7 @@ jobs:
           name: QET-WINDOWS-COMPILADO-${{ job.status }}
           path: QET-ForcaComando-Portatil/
           if-no-files-found: error
-          retention-days: 7
-
-      - name: Registrar resultado da compilacao na branch
-        if: always()
-        continue-on-error: true
-        shell: pwsh
-        env:
-          CI_JOB_STATUS: ${{ job.status }}
-          CI_RUN_ID: ${{ github.run_id }}
-          CI_SHA: ${{ github.sha }}
-        run: |
-          $ErrorActionPreference = "Stop"
-          New-Item -ItemType Directory -Force -Path "validation" | Out-Null
-          @"
-          status=$env:CI_JOB_STATUS
-          run_id=$env:CI_RUN_ID
-          tested_commit=$env:CI_SHA
-          workflow=testar-qet-eletrico.yml
-          note=Only success means calculations, Qt compilation, available ctest and packaging passed; GUI interaction still needs verification.
-          "@ | Set-Content -Path "validation/status-qet-eletrico.txt" -Encoding UTF8
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add validation/status-qet-eletrico.txt
-          git commit -m "[skip ci] validation result $env:CI_JOB_STATUS run $env:CI_RUN_ID"
-          git push origin HEAD:feature/dados-eletricos-dimensionamento
+          retention-days: 30
 
       - name: Guardar logs se a compilacao falhar
         if: failure()

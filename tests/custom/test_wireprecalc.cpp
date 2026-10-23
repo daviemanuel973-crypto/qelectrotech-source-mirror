@@ -29,5 +29,20 @@ int main() {
     q.known=KnownPair::CurrentPower;q.current=10.;a=calculate(q);
     assert(a.valid && near(a.voltage,24.));
     q.powerFactor=0.;a=calculate(q);assert(a.valid && near(a.voltage,24.));
+    q=Input{};q.supply=Supply::TwoWire;q.voltage=220.;q.current=20.;q.powerFactor=1.;
+    q.lengthMeters=1.;a=calculate(q);const double base=a.sectionMm2;
+    q.temperatureFactor=.8;q.groupingFactor=.7;a=calculate(q);
+    assert(a.valid && a.withinTable && a.sectionMm2>base);
+    q.protectionCurrent=25.;q.conventionalTripCurrent=36.25;a=calculate(q);
+    assert(a.valid && a.protectionChecked && a.correctedAmpacity>=25.);
+    q.protectionCurrent=10.;a=calculate(q);assert(!a.valid); // In < Ib
+    q=Input{};q.known=KnownPair::VoltagePower;q.power=5500.;q.voltage=380.;
+    q.mechanicalPower=true;q.efficiency=0.;assert(!calculate(q).valid);
+    q.efficiency=.9;a=calculate(q);
+    assert(a.valid && near(a.power,5500./.9) && near(a.current,5500./(.9*std::sqrt(3.)*380.*.85)));
+    q.faultCurrent=1000.;assert(!calculate(q).valid); // incomplete trip data
+    q.clearingSeconds=.2;q.adiabaticK=115.;a=calculate(q);
+    assert(a.valid && a.shortCircuitChecked && a.sectionMm2>=1000.*std::sqrt(.2)/115.);
+    q.temperatureFactor=0.;assert(!calculate(q).valid);
     std::cout<<"Testes do dimensionamento: OK\n";
 }
