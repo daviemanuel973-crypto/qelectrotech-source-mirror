@@ -1,0 +1,8 @@
+name: Compilar QET REV2 - propriedades verificadas
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    uses: ./.github/workflows/testar-qet-eletrico.yml
