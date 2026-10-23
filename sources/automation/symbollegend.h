@@ -21,6 +21,7 @@
 #include <QFontMetrics>
 #include <QSet>
 #include <QInputDialog>
+#include <QLineEdit>
 #include <QPointer>
 #include <QUndoCommand>
 #include <QPushButton>
@@ -379,7 +380,12 @@ inline void setDocumentReferences(QWidget *parent,QETProject *project) {
             QObject::tr("Identificação para as tabelas (p.ex., X4 ou X5). "
                         "A legenda visível do elemento não será alterada."),
             QLineEdit::Normal,old,&confirmed).trimmed();
-        if(!confirmed)break;
+        if(!confirmed) {
+            // Discard the whole batch on cancel, rather than silently
+            // applying a partial set of names the user did not approve.
+            delete batch;
+            return;
+        }
         if(input.isEmpty() || input==old)continue;
         if(!QRegularExpression(QStringLiteral(
               "^[A-Za-z][A-Za-z0-9._-]{0,39}$")).match(input).hasMatch()) {
