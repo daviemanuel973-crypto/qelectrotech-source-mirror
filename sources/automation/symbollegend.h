@@ -20,12 +20,16 @@
 #include <QFileInfo>
 #include <QFontMetrics>
 #include <QSet>
+#include <QInputDialog>
+#include <QPointer>
+#include <QUndoCommand>
+#include <QPushButton>
 #include <algorithm>
 
 namespace SymbolLegend {
 struct Record {
     Element *symbol = nullptr; // Only used for drawing within this synchronous export.
-    QString designator, abbreviation, kind, function, manufacturer, partNumber;
+    QString designator, abbreviation, kind, comment, function, description, manufacturer, partNumber;
     QString identity;
     int quantity = 1;
 };
@@ -38,6 +42,19 @@ struct Inventory {
 };
 inline QString infoText(const DiagramContext &info,const QString &key) {
     return info.value(key).toString().simplified();
+}
+// Custom project metadata: a documentation reference is deliberately
+// NOT QET's on-screen "label". It survives project save/reopen and is
+// independent of symbol orientation, mirror and visible text items.
+inline QString documentationReferenceKey() {
+    return QStringLiteral("qet_documentation_reference");
+}
+inline QString documentedDesignator(Element *element) {
+    if (!element) return {};
+    const QString visible=element->actualLabel().simplified();
+    if (!visible.isEmpty()) return visible;
+    return element->elementInformations()
+        .value(documentationReferenceKey()).toString().simplified();
 }
 inline QString firstValue(const DiagramContext &info,const QStringList &keys) {
     for(const QString &key:keys) {
@@ -67,16 +84,19 @@ inline Inventory inventory(QETProject *project) {
             DiagramContext info=element->elementInformations();
             Record entry;
             entry.symbol=element;
-            entry.designator=element->actualLabel().simplified();
+            entry.designator=documentedDesignator(element);
             entry.abbreviation=abbreviation(entry.designator);
             entry.kind=firstValue(info,{QStringLiteral("designation"),
                                         QStringLiteral("description")});
             if(entry.kind.isEmpty())entry.kind=element->name().simplified();
             if(entry.kind.isEmpty())entry.kind=QStringLiteral("Símbolo sem descrição");
-            entry.function=firstValue(info,{QStringLiteral("function"),
-                                            QStringLiteral("description"),
-                                            QStringLiteral("designation")});
-            if(entry.function.isEmpty())entry.function=entry.kind;
+            // Don't relabel a terminal's COMMENT as its electrical
+            // FUNCTION. Preserve separate QET fields in the schedule.
+            entry.comment=infoText(info,QStringLiteral("comment"));
+            entry.function=infoText(info,QStringLiteral("function"));
+            entry.description=firstValue(info,{QStringLiteral("description"),
+                                               QStringLiteral("designation")});
+            if(entry.description.isEmpty())entry.description=entry.kind;
             entry.manufacturer=infoText(info,QStringLiteral("manufacturer"));
             entry.partNumber=firstValue(info,{QStringLiteral("manufacturer_reference"),
                                               QStringLiteral("machine_manufacturer_reference")});
@@ -215,28 +235,34 @@ inline bool renderSymbols(QPainter &p,QPdfWriter &pdf,const Inventory &inv,
 inline bool renderDeviceList(QPainter &p,QPdfWriter &pdf,
                              const Inventory &inv,const QRect &page,
                              const QString &projectTitle,int &folio) {
+    // Mirrors the user's QET nomenclature: independent comment and
+    // function columns, not an inferred replacement of one by the other.
     const int rows=22;
-    const int w1=page.width()*18/100,w2=page.width()*65/100,w3=page.width()-w1-w2;
+    const int percentages[]={12,20,23,32,13};
     for(int offset=0;offset<inv.devices.size();offset+=rows) {
         if(!pdf.newPage())return false;
         header(p,page,QStringLiteral("FUNÇÃO DOS DISPOSITIVOS"),projectTitle,++folio);
         int y=page.top()+85;
         const int rowH=std::min(74,(page.bottom()-y-30)/(rows+1));
-        auto draw=[&](const QString &a,const QString &b,const QString &c,bool isHead) {
-            QRect c1(page.left(),y,w1,rowH);
-            QRect c2(page.left()+w1,y,w2,rowH);
-            QRect c3(page.left()+w1+w2,y,w3,rowH);
-            rect(p,c1);rect(p,c2);rect(p,c3);
-            cellText(p,c1,a,7,isHead);
-            cellText(p,c2,b,7,isHead);
-            cellText(p,c3,c,7,isHead);
+        auto draw=[&](const QStringList &values,bool isHead) {
+            int x=page.left();
+            for(int k=0;k<5;++k) {
+                const int width=k==4 ? page.right()-x+1 :
+                    page.width()*percentages[k]/100;
+                const QRect cell(x,y,width,rowH);
+                rect(p,cell);
+                cellText(p,cell,values.value(k),7,isHead);
+                x+=width;
+            }
             y+=rowH;
         };
-        draw(QStringLiteral("REFERÊNCIA"),QStringLiteral("DESCRIÇÃO / FUNÇÃO"),
-             QStringLiteral("FABRICANTE"),true);
+        draw({QStringLiteral("LEGENDA"),QStringLiteral("COMENTÁRIO"),
+              QStringLiteral("FUNÇÃO"),QStringLiteral("DESCRIÇÃO TEXTUAL"),
+              QStringLiteral("FABRICANTE")},true);
         for(int j=offset;j<std::min(offset+rows,inv.devices.size());++j) {
             const auto &item=inv.devices.at(j);
-            draw(item.designator,item.function,item.manufacturer,false);
+            draw({item.designator,item.comment,item.function,
+                  item.description,item.manufacturer},false);
         }
     }
     return true;
@@ -294,6 +320,93 @@ inline bool writePdf(QETProject *project,const QString &path) {
                   renderMaterials(painter,pdf,inv,page,project->title(),folio);
     painter.end();
     return ok;
+}
+// Undoable metadata-only edit. The visible QET label stays unchanged.
+class SetDocumentReference : public QUndoCommand {
+public:
+    SetDocumentReference(Element *element,const QString &reference)
+        : m_element(element),m_before(element->elementInformations()),
+          m_after(m_before) {
+        m_after.addValue(documentationReferenceKey(),reference,false);
+        setText(QObject::tr("Definir referência documental do borne"));
+    }
+    void redo() override { if(m_element)m_element->setElementInformations(m_after); }
+    void undo() override { if(m_element)m_element->setElementInformations(m_before); }
+private:
+    QPointer<Element> m_element;
+    DiagramContext m_before,m_after;
+};
+inline bool terminalLike(Element *element) {
+    if(!element) return false;
+    if(element->linkType() & Element::Terminale)return true;
+    const QString kind=(element->name()+QStringLiteral(" ")+
+                         element->location().baseName()).toLower();
+    return kind.contains(QStringLiteral("borne")) ||
+           kind.contains(QStringLiteral("terminal")) ||
+           kind.contains(QStringLiteral("clamp")) ||
+           kind.contains(QStringLiteral("screw-terminal"));
+}
+inline void setDocumentReferences(QWidget *parent,QETProject *project) {
+    if(!project || project->isReadOnly() || !project->undoStack()) {
+        QMessageBox::warning(parent,QObject::tr("Referências de bornes"),
+            QObject::tr("Abra um projeto editável para documentar os bornes."));
+        return;
+    }
+    QList<Element *> selected;
+    for(Diagram *folio:project->diagrams()) {
+        if(!folio)continue;
+        for(Element *e:folio->elements())
+            if(e && e->isSelected() && terminalLike(e))
+                selected<<e;
+    }
+    if(selected.isEmpty()) {
+        QMessageBox::information(parent,QObject::tr("Referências de bornes"),
+            QObject::tr("Selecione um ou mais bornes no esquema. "
+                        "A operação NÃO gira os símbolos e NÃO exibe "
+                        "novos textos sobre eles."));
+        return;
+    }
+    auto *batch=new QUndoCommand(QObject::tr(
+        "Referências documentais de bornes (sem legendas visíveis)"));
+    int edits=0;
+    for(Element *element:selected) {
+        const QString old=documentedDesignator(element);
+        bool confirmed=false;
+        const QString input=QInputDialog::getText(parent,
+            QObject::tr("Referência documental do borne"),
+            QObject::tr("Identificação para as tabelas (p.ex., X4 ou X5). "
+                        "A legenda visível do elemento não será alterada."),
+            QLineEdit::Normal,old,&confirmed).trimmed();
+        if(!confirmed)break;
+        if(input.isEmpty() || input==old)continue;
+        if(!QRegularExpression(QStringLiteral(
+              "^[A-Za-z][A-Za-z0-9._-]{0,39}$")).match(input).hasMatch()) {
+            QMessageBox::warning(parent,QObject::tr("Referência inválida"),
+                QObject::tr("Use uma identificação como X4, X5 ou X1.2, "
+                            "sem espaços nem caracteres de controle."));
+            continue;
+        }
+        // Native labels are intentionally not overwritten: the user
+        // specifically wants upside-down terminal text left absent.
+        if(!element->actualLabel().simplified().isEmpty()) {
+            QMessageBox::information(parent,QObject::tr("Legenda existente"),
+                QObject::tr("Este borne já possui uma legenda nativa. "
+                            "Para evitar duas identificações conflitantes, "
+                            "essa entrada não foi alterada."));
+            continue;
+        }
+        new SetDocumentReference(element,input)->setParent(batch);
+        ++edits;
+    }
+    if(edits) {
+        project->undoStack()->push(batch);
+        QMessageBox::information(parent,QObject::tr("Bornes documentados"),
+            QObject::tr("%1 referência(s) registrada(s) para a documentação, "
+                        "sem alterar posição, rotação ou legenda visível. "
+                        "A edição pode ser desfeita com Ctrl+Z. "
+                        "Salve o projeto para persistir os dados.")
+                .arg(edits));
+    } else delete batch;
 }
 inline void exportPdf(QWidget *parent,QETProject *project) {
     if(!project) {
