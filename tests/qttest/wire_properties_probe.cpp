@@ -25,6 +25,7 @@
 #include <utility>
 #include "../../sources/QPropertyUndoCommand/qpropertyundocommand.h"
 #include "../../sources/automation/autowireproperties.h"
+#include "../../sources/automation/symbollegend.h"
 #include "../../sources/automation/wireprecalc.h"
 #include "../../sources/diagram.h"
 #include "../../sources/diagramcontent.h"
@@ -120,6 +121,28 @@ int main(int argc, char **argv) {
                     "route engine reports cross-device/cross-page route or missing passage");
         for (Conductor *c:wires)
             require(c->properties()==old.value(c),"trace must never edit conductor properties");
+
+        // A nomenclature row is not a graphic legend. Export the REAL
+        // QET element drawings into a multipage A3 PDF, then confirm the
+        // generated document is nonempty and has the PDF file signature.
+        const auto inventory=SymbolLegend::inventory(&project);
+        require(inventory.elementsScanned==topology.elements,
+                "symbol legend scans all elements on all project folios");
+        require(!inventory.symbols.isEmpty() && !inventory.devices.isEmpty(),
+                "graphic legend and device list have actual project records");
+        require(inventory.symbols.size()<=inventory.devices.size(),
+                "repeated native symbols collapse into one legend definition");
+        const QString legendFile=settings.path()+QStringLiteral("/qet-simbolos.pdf");
+        require(SymbolLegend::writePdf(&project,legendFile),
+                "A3 graphic symbol/device schedule/BOM PDF was rendered");
+        QFile legend(legendFile);
+        require(legend.open(QIODevice::ReadOnly),"generated graphic legend opens");
+        require(legend.size()>3000 && legend.read(5)==QByteArray("%PDF-"),
+                "generated graphic legend contains actual PDF bytes");
+        legend.close();
+        for (Conductor *c:wires)
+            require(c->properties()==old.value(c),
+                    "graphic legend must not alter original wire properties");
 
         QetWirePrecalc::Input input;
         input.voltage=380.; input.current=10.; input.powerFactor=.85;
@@ -457,6 +480,9 @@ int main(int argc, char **argv) {
                 "Qt trace picker, selected circuit sizing and completion succeeded");
         std::printf("PASS QET Qt dialog: voltage+power pair, trace picker, preview, apply, confirmation\n");
 
+        std::printf("PASS QET graphic legend: %d distinct pictograms, %d devices, %d material rows, A3 PDF exported\\n",
+                    int(inventory.symbols.size()),int(inventory.devices.size()),
+                    int(inventory.materials.size()));
         std::printf("PASS QET graph tracing: %d folios, %d elements, %d terminals, %d wires, %d potentials\n",
                     topology.folios,topology.elements,topology.terminals,
                     topology.wires,int(topology.groups.size()));
