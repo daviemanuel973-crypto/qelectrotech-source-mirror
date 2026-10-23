@@ -181,6 +181,13 @@ int main(int argc, char **argv) {
                     .toString()==QStringLiteral("X5") &&
                 !restoredXml.keyMustShow(SymbolLegend::documentationReferenceKey()),
                 "documentation-only X5 persists across QET XML round-trip without visible text");
+        require(restoredXml.value(QStringLiteral("comment")).toString() ==
+                    QStringLiteral("Borne de retorno do teste") &&
+                restoredXml.value(QStringLiteral("function")).toString() ==
+                    QStringLiteral("Retorno da bomba") &&
+                restoredXml.value(QStringLiteral("description")).toString() ==
+                    QStringLiteral("Borne de conexão 24 Vcc"),
+                "all terminal documentation fields persist in native QET XML");
         require(SymbolLegend::documentedDesignator(documentedTerminal)
                     ==QStringLiteral("X5"),
                 "empty native label is supplemented by documentary reference");
