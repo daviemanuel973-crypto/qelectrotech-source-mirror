@@ -47,7 +47,7 @@ diff --git a/sources/automation/autowireproperties.h b/sources/automation/autowi
 new file mode 100644
 --- /dev/null
 +++ b/sources/automation/autowireproperties.h
-@@ -0,0 +1,734 @@
+@@ -0,0 +1,736 @@
 +/*
 + * QElectroTech - automatic educational power/control wire properties.
 + * Copyright 2026. Distributed under GPL-2.0-or-later, compatible with QET.
@@ -320,8 +320,10 @@ new file mode 100644
 +        }
 +    }
 +    selectedCircuit.intersect(available);
-+    if(!classificationOnly) {
-+        if(selectedCircuit.isEmpty()) result.traceComplete=false;
++    // With no explicitly selected circuit, classify all wires but DO NOT
++    // dimension any. This is not a trace failure. Only a user-targeted
++    // invalid potential should abort the change.
++    if(!classificationOnly && !selectedCircuit.isEmpty()) {
 +        for(Conductor *wire:selectedCircuit) {
 +            const int id=trace.groupByConductor.value(wire,-1);
 +            if(!trace.canSizeGroup(id)) {
