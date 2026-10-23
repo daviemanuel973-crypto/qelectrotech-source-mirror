@@ -3,6 +3,7 @@
 #include <QApplication>
 #include <QDir>
 #include <QFileInfo>
+#include <QFile>
 #include <QFontDatabase>
 #include <QGraphicsPathItem>
 #include <QHash>
