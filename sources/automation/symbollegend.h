@@ -147,11 +147,11 @@ inline void symbolImage(QPainter &p,Element *element,const QRect &box) {
     p.translate(target.center());
     p.scale(scale,scale);
     p.translate(-bounds.center());
-    QStyleOptionGraphicsItem option;
-    option.state=QStyle::State_None;
-    // Render the same vector QPicture that the QET editor draws. We do not
-    // paste a screenshot, copy a page or replace the symbol with an icon.
-    element->paint(&p,&option,nullptr);
+    // Null option deliberately forces QET's full-detail QPicture:
+    // at PDF thumbnail scale some large symbols have no low-zoom cache,
+    // which would otherwise make the symbol cell appear EMPTY.
+    // Render actual native vector artwork, not a generic placeholder.
+    element->paint(&p,nullptr,nullptr);
     p.restore();
 }
 inline void header(QPainter &p,const QRect &page,const QString &title,
