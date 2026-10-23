@@ -271,6 +271,16 @@ inline Result apply(QETProject *project, const QetWirePrecalc::Output &sizing,
         }
     }
     selectedCircuit.intersect(available);
+    // One continuous potential may feed several branches with different
+    // currents. It must not inherit the single-load input as a common size.
+    QSet<int> targetGroups;
+    for(Conductor *wire:selectedCircuit)targetGroups.insert(trace.groupByConductor.value(wire,-1));
+    if(!classificationOnly && ElectricalData::loads(trace,targetGroups).size()>1) {
+        result.traceComplete=false;
+        result.details << QObject::tr("Múltiplas cargas no percurso: separar alimentador e derivações antes de dimensionar.");
+        return result;
+    }
+
     // With no explicitly selected circuit, classify all wires but DO NOT
     // dimension any. This is not a trace failure. Only a user-targeted
     // invalid potential should abort the change.
@@ -570,7 +580,8 @@ inline void run(QWidget *parent, QETProject *project) {
                         break;
                     }
         }
-        bool selectedTraceSafe=hasCircuit;
+        const bool multipleLoads=ElectricalData::loads(preflight,sizingGroups).size()>1;
+        bool selectedTraceSafe=hasCircuit && !multipleLoads;
         for(int id:sizingGroups)
             if(!preflight.canSizeGroup(id)) selectedTraceSafe=false;
         // Classifying a diagram is independent of the motor current.
@@ -585,6 +596,8 @@ inline void run(QWidget *parent, QETProject *project) {
                 "IDENTIFICAÇÃO APENAS: os valores de tensão, corrente e potência "
                 "NÃO SERÃO USADOS. Use o seletor de potenciais rastreados "
                 "para dimensionar sem caçar fios manualmente no desenho."));
+        else if(multipleLoads)preview->setText(QObject::tr(
+            "PENDENTE: este potencial alcança várias cargas. O alimentador e as derivações podem ter correntes diferentes; não aplicar uma única seção."));
         else if(!selectedTraceSafe)
             preview->setText(QObject::tr(
                 "Nenhum potencial seguro selecionado, ou a seleção contém "
@@ -709,10 +722,7 @@ inline void run(QWidget *parent, QETProject *project) {
                            classificationOnly, chosenPotentials);
     if (!r.traceComplete && !classificationOnly) {
         QMessageBox::warning(parent, QObject::tr("Rastreamento incompleto"),
-            QObject::tr("O potencial escolhido contém ligação inválida ou "
-                        "seta sem par. Este circuito foi bloqueado; os demais "
-                        "continuam disponíveis. Confira Editar → "
-                        "Rastrear conexões elétricas do projeto."));
+            QObject::tr("O percurso contém múltiplas cargas, ligação inválida ou seta sem par. Separe alimentadores e derivações e confira o rastreamento antes de dimensionar."));
         return;
     }
     QMessageBox message(QMessageBox::Information,

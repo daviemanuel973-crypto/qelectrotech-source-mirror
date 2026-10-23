@@ -323,8 +323,9 @@ int main(int argc, char **argv) {
             // The fixture contains old, unpaired folio reports; the test
             // must select a power potential that is electrically eligible,
             // not a deliberately blocked branch.
-            if (!topology.canSizeGroup(topology.groupByConductor.value(candidate,-1)))
-                continue;
+            const int candidateId=topology.groupByConductor.value(candidate,-1);
+            if (!topology.canSizeGroup(candidateId) ||
+                ElectricalData::loads(topology,QSet<int>{candidateId}).size()>1)continue;
             auto potential=candidate->relatedPotentialConductors(true);
             potential.insert(candidate);
             bool conflicting=false;
@@ -408,6 +409,18 @@ int main(int argc, char **argv) {
         require(proposedPreservedPE.m_wire_section==beforePE.m_wire_section,
                 "PE section not guessed from motor's preliminary section");
 
+        bool multiLoadBlocked=false;
+        for(int id=0;id<topology.groups.size();++id) {
+            if(!topology.canSizeGroup(id) || ElectricalData::loads(topology,QSet<int>{id}).size()<2)continue;
+            QHash<Conductor*,ConductorProperties> snapshot;
+            for(auto*c:wires)snapshot.insert(c,c->properties());
+            const auto rejected=AutoWireProperties::apply(&project,calc,true,false,QSet<int>{id});
+            require(!rejected.traceComplete && rejected.sizedConductors==0 && rejected.modified==0,
+                    "multiple load branches cannot receive one generic conductor section");
+            for(auto*c:wires)require(c->properties()==snapshot.value(c),"blocked branch sizing is atomic");
+            multiLoadBlocked=true;break;
+        }
+        require(multiLoadBlocked,"real industrial fixture exercises ambiguous shared feeders");
         // Independent controlled metadata test, even if the fixture has no
         // recognizable power/control elements for the classifier.
         Conductor *wire=wires.first();
@@ -459,7 +472,8 @@ int main(int argc, char **argv) {
         const auto reopenedGraph=WireTrace::scan(&reopened);
         int eligiblePotential=-1;
         for(int id=0;id<reopenedGraph.groups.size();++id) {
-            if(!reopenedGraph.canSizeGroup(id)) continue;
+            if(!reopenedGraph.canSizeGroup(id) ||
+               ElectricalData::loads(reopenedGraph,QSet<int>{id}).size()>1)continue;
             for(Conductor *candidate:reopenedGraph.groups.at(id).conductors)
                 if(candidate && AutoWireProperties::classify(candidate) ==
                     AutoWireProperties::Role::Power) {
@@ -471,6 +485,7 @@ int main(int argc, char **argv) {
         if(eligiblePotential<0)
             for(int id=0;id<reopenedGraph.groups.size();++id)
                 if(reopenedGraph.canSizeGroup(id) &&
+                   ElectricalData::loads(reopenedGraph,QSet<int>{id}).size()<=1 &&
                    !reopenedGraph.groups.at(id).conductors.isEmpty()) {
                     eligiblePotential=id; break;
                 }

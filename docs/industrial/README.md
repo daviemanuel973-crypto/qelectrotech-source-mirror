@@ -17,7 +17,7 @@ Esta versão usa o aplicativo QElectroTech real, com integração direta no cód
 
 **Rastrear conexões elétricas** inventaria todas as folhas, fios, terminais, potenciais e vínculos nativos entre setas. **Percorrer circuito** mostra passagens por dispositivos e distingue caminhos condicionais de continuidade metálica. Pistas geométricas não são tratadas como conexões comprovadas. Bobinas, cargas e conversores não são curtos entre potenciais.
 
-**Editar dados elétricos das cargas** cadastra dados conhecidos no próprio `.qet`. O dimensionamento tenta carregar os dados quando encontra uma única carga candidata. Múltiplas cargas e associações ambíguas precisam de revisão; não existe agregação automática geral de alimentadores.
+**Editar dados elétricos das cargas** cadastra dados conhecidos no próprio `.qet`. O dimensionamento tenta carregar os dados quando encontra uma única carga candidata. Percursos com múltiplas cargas são bloqueados para receber uma seção única, pois o alimentador e as derivações podem ter correntes diferentes. Associações ambíguas precisam de revisão; não existe agregação automática geral de alimentadores.
 
 ### Pré-dimensionamento
 
