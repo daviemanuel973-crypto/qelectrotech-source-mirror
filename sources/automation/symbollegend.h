@@ -324,8 +324,10 @@ inline bool writePdf(QETProject *project,const QString &path) {
 // Undoable metadata-only edit. The visible QET label stays unchanged.
 class SetDocumentReference : public QUndoCommand {
 public:
-    SetDocumentReference(Element *element,const QString &reference)
-        : m_element(element),m_before(element->elementInformations()),
+    SetDocumentReference(Element *element,const QString &reference,
+                         QUndoCommand *parent=nullptr)
+        : QUndoCommand(parent),m_element(element),
+          m_before(element->elementInformations()),
           m_after(m_before) {
         m_after.addValue(documentationReferenceKey(),reference,false);
         setText(QObject::tr("Definir referência documental do borne"));
@@ -395,7 +397,7 @@ inline void setDocumentReferences(QWidget *parent,QETProject *project) {
                             "essa entrada não foi alterada."));
             continue;
         }
-        new SetDocumentReference(element,input)->setParent(batch);
+        new SetDocumentReference(element,input,batch);
         ++edits;
     }
     if(edits) {
