@@ -47,7 +47,7 @@ diff --git a/sources/automation/autowireproperties.h b/sources/automation/autowi
 new file mode 100644
 --- /dev/null
 +++ b/sources/automation/autowireproperties.h
-@@ -0,0 +1,736 @@
+@@ -0,0 +1,737 @@
 +/*
 + * QElectroTech - automatic educational power/control wire properties.
 + * Copyright 2026. Distributed under GPL-2.0-or-later, compatible with QET.
@@ -223,16 +223,11 @@ new file mode 100644
 +    ConductorProperties props = c->properties();
 +    // Only fill technical fields that are blank. Do not touch label, formula,
 +    // text visibility, wire drawing colour, routing or geometry.
-+    double section = 0.;
-+    if (role == Role::Power || role == Role::Neutral)
-+        section = sizing.sectionMm2;
-+    else if (role == Role::Control)
-+        section = 1.5; // educational control circuit baseline
-+    // PE sizing depends on material, mechanical protection, installation
-+    // and fault-loop/protective-device data. Never infer it from a global
-+    // motor current, even if the selected circuit carries that PE.
-+    else if (role == Role::Earth)
-+        section = 0.;
++    // A selected control circuit or as-yet-unclassified potential has its
++    // OWN measured/input electrical load. Never impose 1.5 mm2 after
++    // calculating a different section from actual V/I/P and length.
++    // No auto-section for protective earth (PE).
++    const double section = role == Role::Earth ? 0. : sizing.sectionMm2;
 +    // The single V/I/P input describes ONE circuit, not every pump/feeder
 +    // in the project. Never assign its section outside the chosen circuit.
 +    if (selectedCircuit && section > 0. &&
@@ -249,7 +244,7 @@ new file mode 100644
 +        props.m_wire_color = color;
 +
 +    // The motor supply voltage is not necessarily the control voltage.
-+    if (selectedCircuit && (role == Role::Power || role == Role::Neutral) &&
++    if (selectedCircuit && role != Role::Earth &&
 +        (overwrite || props.m_tension_protocol.trimmed().isEmpty()))
 +        props.m_tension_protocol = QString::number(sizing.voltage, 'f', 1) + QStringLiteral(" V");
 +    if (props.m_function.trimmed().isEmpty()) {
@@ -366,15 +361,21 @@ new file mode 100644
 +    for (Conductor *c : wires) {
 +        if (!c) continue;
 +        const Role role = resolved.value(c, Role::Unknown);
++        const bool inCircuit = selectedCircuit.contains(c);
 +        switch (role) {
 +            case Role::Power:   ++result.power; break;
 +            case Role::Control: ++result.control; break;
 +            case Role::Neutral: ++result.neutral; break;
 +            case Role::Earth:   ++result.earth; break;
-+            case Role::Unknown: ++result.unknown; continue;
++            case Role::Unknown:
++                ++result.unknown;
++                // Unclassified is not "unsizeable": the user may select a
++                // specific, fully traced potential and supply its load data.
++                // Leave function/color untouched; size only chosen wires.
++                if(!inCircuit)continue;
++                break;
 +        }
 +        const ConductorProperties before = c->properties();
-+        const bool inCircuit = selectedCircuit.contains(c);
 +        const ConductorProperties after = proposal(c, role, sizing, overwrite, inCircuit);
 +        if (!inCircuit) ++result.preservedOutOfScope;
 +        if (inCircuit && after.m_wire_section != before.m_wire_section)
