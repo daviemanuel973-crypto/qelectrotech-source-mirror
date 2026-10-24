@@ -20,7 +20,7 @@
 #include <cmath>
 
 namespace IndustrialDocumentation {
-enum class Section { All, Materials, Symbols };
+enum class Section { All, Materials, Symbols, Lists };
 struct Table { QString title; QStringList headings; QList<QStringList> rows; QList<int> weights; };
 inline bool generated(Diagram *d) {
     return d && d->border_and_titleblock.additionalFields()
@@ -268,19 +268,21 @@ inline int createSheets(QETProject *project,Section section=Section::All) {
         section==Section::Symbols?QStringLiteral("symbols"):QString();
     const QString command=section==Section::Materials?QObject::tr("Gerar/atualizar lista de materiais"):
         section==Section::Symbols?QObject::tr("Gerar/atualizar simbologia"):
+        section==Section::Lists?QObject::tr("Atualizar listas automáticas"):
                                  QObject::tr("Gerar/atualizar documentação industrial");
     project->undoStack()->beginMacro(command);
     // Remove through native commands so refresh, including manual edits on
     // generated pages, is recoverable in one undo. Other sections are retained.
     const auto oldPages=project->diagrams();
     for(Diagram *d:oldPages)
-        if(generated(d) && (section==Section::All || sheetKind(d)==selectedKind))
+        if(generated(d) && (section==Section::All || sheetKind(d)==selectedKind ||
+           (section==Section::Lists && (sheetKind(d)=="materials" || sheetKind(d)=="symbols"))))
             project->undoStack()->push(new RemoveDiagramCommand(project,d));
     // Scan after detaching old documentation, so page references reflect the
     // actual source folios even when generated sheets were moved between them.
     const auto inv=SymbolLegend::inventory(project);
     const auto ts=section==Section::Symbols?QList<Table>{}:
-        section==Section::Materials?QList<Table>{materialTable(inv)}:tables(project);
+        (section==Section::Materials || section==Section::Lists)?QList<Table>{materialTable(inv)}:tables(project);
     int count=0;
     auto page=[&](const QString&title,const QString&kind) {
         auto *d=project->addNewDiagram();auto props=d->border_and_titleblock.exportTitleBlock();
@@ -329,6 +331,40 @@ inline int createSheets(QETProject *project,Section section=Section::All) {
 }
 inline int createMaterials(QETProject *project) { return createSheets(project,Section::Materials); }
 inline int createSymbols(QETProject *project) { return createSheets(project,Section::Symbols); }
+inline QString autoRefreshKey() { return QStringLiteral("qet_auto_refresh_lists"); }
+inline bool autoRefreshEnabled(QETProject *project) {
+    return project && project->projectProperties().value(autoRefreshKey()).toBool();
+}
+class AutoRefreshCommand : public QUndoCommand {
+    QPointer<QETProject> m_project;
+    QVariant m_before;
+    bool m_hadBefore, m_enabled;
+    void apply(const QVariant &value,bool present) {
+        if(!m_project)return;
+        auto props=m_project->projectProperties();
+        if(present)props.addValue(autoRefreshKey(),value,false);
+        else props.remove(autoRefreshKey());
+        m_project->setProjectProperties(props);m_project->setModified(true);
+    }
+public:
+    AutoRefreshCommand(QETProject *project,bool enabled):m_project(project),
+        m_before(project->projectProperties().value(autoRefreshKey())),
+        m_hadBefore(project->projectProperties().contains(autoRefreshKey())),m_enabled(enabled) {
+        setText(QObject::tr("Atualização automática das listas ao salvar"));
+    }
+    void redo() override { apply(m_enabled,true); }
+    void undo() override { apply(m_before,m_hadBefore); }
+};
+inline void setAutoRefresh(QETProject *project,bool enabled) {
+    if(project && !project->isReadOnly() && project->undoStack() && autoRefreshEnabled(project)!=enabled)
+        project->undoStack()->push(new AutoRefreshCommand(project,enabled));
+}
+inline void refreshListsBeforeSave(QETProject *project) {
+    // Saving an untouched file remains stable; this opt-in policy is stored
+    // in the project, and uses the same atomic undo as explicit generation.
+    if(autoRefreshEnabled(project))
+        createSheets(project,Section::Lists);
+}
 inline void generateSheets(QWidget *parent,QETProject *project,Section section=Section::All) {
     if(!project)return;
     const int n=createSheets(project,section);

@@ -184,11 +184,47 @@ static void checkAutomaticLists(QETProject &project,const QString &outputDir) {
                 saved.diagrams().size()==originalPages.size()+1+refreshedMaterialPages+symbolPages,
                 "symbol refresh after reopen does not duplicate pages");
         for(Diagram *d:savedMaterials)require(saved.diagrams().contains(d),"persisted sections refresh independently");
+        IndustrialDocumentation::setAutoRefresh(&saved,true);
+        require(IndustrialDocumentation::autoRefreshEnabled(&saved),"automatic save policy enables per project");
+        saved.undoStack()->undo();
+        require(!IndustrialDocumentation::autoRefreshEnabled(&saved),"automatic save policy is undoable");
+        saved.undoStack()->redo();
+        Element *changed=SymbolLegend::inventory(&saved).materials.first().symbol;
+        auto change=changed->elementInformations();change.addValue("manufacturer_reference","AUTO-SAVE-CODE",false);
+        changed->setElementInformations(change);saved.setModified(true);
+        const QString automaticPath=QDir(outputDir).filePath("QET-Listas-AutoSalvar.qet");
+        saved.setFilePath(automaticPath);
+        require(saved.write().isOk(),"save automatically regenerates enabled lists");
+        bool automaticText=false;
+        for(Diagram *d:saved.diagrams())if(IndustrialDocumentation::sheetKind(d)=="materials")
+            for(auto *item:d->items())if(auto *t=qgraphicsitem_cast<IndependentTextItem*>(item))
+                if(t->toPlainText().contains("AUTO-SAVE-CODE"))automaticText=true;
+        require(automaticText,"saved materials reflect last source edit without explicit generation");
+        QFile stable(automaticPath);require(stable.open(QIODevice::ReadOnly),"automatic output readable");
+        const QByteArray before=stable.readAll();stable.close();
+        const int savedIndex=saved.undoStack()->index();
+        require(saved.write().isOk() && saved.undoStack()->index()==savedIndex,
+                "saving unchanged automatic project adds no refresh undo commands");
+        require(stable.open(QIODevice::ReadOnly) && stable.readAll()==before,
+                "saving unchanged automatic project preserves exact file bytes");
+        stable.close();
+        QETProject automatic(automaticPath);
+        require(automatic.state()==QETProject::Ok && IndustrialDocumentation::autoRefreshEnabled(&automatic),
+                "automatic save preference persists across project reopen");
+        int autoMaterials=0,autoSymbols=0;
+        for(Diagram *d:automatic.diagrams()) {
+            autoMaterials+=IndustrialDocumentation::sheetKind(d)=="materials";
+            autoSymbols+=IndustrialDocumentation::sheetKind(d)=="symbols";
+        }
+        require(autoMaterials>0 && autoSymbols==symbolPages,"both automatic lists are present in saved file");
+        IndustrialDocumentation::setAutoRefresh(&saved,false);
+        const auto frozen=saved.diagrams();
+        require(saved.write().isOk() && saved.diagrams()==frozen,"disabled automatic policy preserves existing list pages");
     }
     while(project.undoStack()->index()>undoIndex)project.undoStack()->undo();
     require(project.diagrams()==originalPages,"undo restores exact original folio order");
     first->setElementInformations(firstInfo);
-    std::printf("PASS QET automatic lists: grouped BOM, native quantities/exclusions, auxiliary parts, pending data, independent refresh, legacy/manual/empty sheets, undo/redo, save/reopen\n");
+    std::printf("PASS QET automatic lists: grouped BOM, native quantities/exclusions, auxiliary parts, pending data, independent refresh, legacy/manual/empty sheets, undo/redo, save/reopen, automatic save and stable unchanged writes\n");
     std::fflush(stdout);
 }
 int main(int argc, char **argv) {

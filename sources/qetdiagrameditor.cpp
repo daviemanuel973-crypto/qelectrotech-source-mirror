@@ -1666,6 +1666,17 @@ void QETDiagramEditor::setUpMenu()
         this,[this](){IndustrialDocumentation::generateMaterials(this,currentProject());});
     connect(industrial->addAction(tr("Gerar/atualizar simbologia...")), &QAction::triggered,
         this,[this](){IndustrialDocumentation::generateSymbols(this,currentProject());});
+    auto *auto_lists=industrial->addAction(tr("Atualizar materiais e simbologia ao salvar"));
+    auto_lists->setCheckable(true);
+    auto_lists->setToolTip(tr("Ao salvar, substitui as folhas automáticas das duas listas com os dados atuais dos componentes. Mantenha textos próprios em folhas manuais."));
+    connect(industrial,&QMenu::aboutToShow,this,[this,auto_lists](){
+        auto *project=currentProject();
+        auto_lists->setEnabled(project && !project->isReadOnly());
+        auto_lists->setChecked(IndustrialDocumentation::autoRefreshEnabled(project));
+    });
+    connect(auto_lists,&QAction::triggered,this,[this](bool enabled){
+        IndustrialDocumentation::setAutoRefresh(currentProject(),enabled);
+    });
     connect(industrial->addAction(tr("Gerar/atualizar documentação completa em folhas editáveis...")), &QAction::triggered,
         this,[this](){IndustrialDocumentation::generateSheets(this,currentProject());});
     connect(industrial->addAction(tr("Exportar tabelas CSV...")), &QAction::triggered,
