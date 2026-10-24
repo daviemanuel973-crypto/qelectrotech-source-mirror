@@ -69,6 +69,7 @@
 #include "projectview.h"
 #include "qetproject.h"
 #include "automation/autowireproperties.h"
+#include "automation/projectcircuitsizingui.h"
 #include "automation/symbollegend.h"
 #include "automation/industrialdocumentation.h"
 #include "qetgraphicsitem/ViewItem/qetgraphicstableitem.h"
@@ -1636,6 +1637,8 @@ void QETDiagramEditor::setUpMenu()
 	menu_edition -> addAction(m_conductor_reset);
 	// Native and undoable educational wire-property inference.
 	QMenu *industrial = menuBar()->addMenu(tr("Industrial"));
+	connect(industrial->addAction(tr("Dimensionar alimentação, derivações, neutro e PE...")), &QAction::triggered,
+		this,[this](){ProjectCircuitSizing::run(this,currentProject());});
 	QAction *auto_wire_props = industrial->addAction(tr("Dimensionar condutores / identificar fios..."));
 	connect(auto_wire_props, &QAction::triggered, this, [this]() {
 		AutoWireProperties::run(this, currentProject());

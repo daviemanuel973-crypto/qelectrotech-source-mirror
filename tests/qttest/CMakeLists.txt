@@ -282,6 +282,13 @@ function(qet_add_app_test name)
   target_link_libraries(${name} PRIVATE qelectrotech_objects Qt::Test)
 endfunction()
 
+add_executable(tst_radialsizing tst_radialsizing.cpp)
+target_include_directories(tst_radialsizing PRIVATE ${QET_DIR}/sources)
+target_link_libraries(tst_radialsizing PRIVATE Qt::Test)
+add_test(NAME tst_radialsizing COMMAND tst_radialsizing)
+qet_add_app_test(tst_projectcircuitsizing tst_projectcircuitsizing.cpp radial_test_fixture.h)
+set_tests_properties(tst_projectcircuitsizing PROPERTIES TIMEOUT 180)
+
 # Space on a picture turns its own transform, which the file saves (#1413),
 # alone and with a group.
 qet_add_app_test(tst_rotateselectionimage tst_rotateselectionimage.cpp)

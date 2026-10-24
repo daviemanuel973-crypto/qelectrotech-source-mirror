@@ -1,0 +1,46 @@
+# Dimensionamento de alimentações e derivações
+
+O menu **Industrial → Dimensionar alimentação, derivações, neutro e PE** acrescenta cálculo por trecho ao QET. A ferramenta individual anterior continua disponível para seleção/pré-dimensionamento; ela não deve aplicar a corrente de uma carga a um alimentador compartilhado.
+
+## Fluxo
+
+1. Selecione a origem e seus terminais de saída. A alimentação pode ser monofásica L-N, bifásica 120°, trifásica ou CC. Informe tensão, frequência CA, limites de queda, impedância externa de laço, curto máximo e fator mínimo de tensão. O modelo de impedância deve constituir limite superior aplicável aos laços de falta considerados na origem. O alcance é baixa tensão, até 1000 V CA / 1500 V CC; limites genéricos IEC 60898-1 só são usados até 125 A, 440 V CA e 50/60 Hz. Outras condições exigem envelope documentado do dispositivo.
+2. Confirme o cenário de manobra. Pares elétricos reconhecidos são percorridos sem unir os polos entre si. Setas usam vínculos nativos entre folhas. Pares geométricos e alternativas de comutadores precisam de confirmação individual; alternativas incompatíveis não podem ser fechadas simultaneamente. Cargas, bobinas e conversores não viram emendas.
+3. Revise os dados das cargas. Campos `qet_*` existentes têm prioridade; classificações de carga impedem tratar corrente de fonte/proteção como consumo. Ratings nativos inequivocamente escritos em V/A também são lidos. Potência mecânica requer rendimento. Corrente é RMS e cos φ é o fator de deslocamento da fundamental.
+4. Complete os trechos: comprimento físico, Kt/Kg, número de condutores carregados, mínimos, perfil e cabo/circuito. A edição em lote aceita dados comuns explicitamente informados. Comprimentos de cabos nativos são aproveitados apenas quando há um trecho por veia; comprimentos ambíguos continuam pendentes. Não se usa comprimento gráfico nem se repete arbitrariamente o comprimento total em vários trechos.
+5. Confira os perfis. Importe CSV `seção;Iz2;Iz3;Iz4`, com mm² e A, ou edite a tabela. Declare material, isolação, método, referência, resistividade efetiva na temperatura/espectro, reatância, k e mínimos físicos. Iz4=0 indica dado indisponível. A confirmação é declaração do usuário sobre os dados, não certificação emitida pelo programa.
+6. Cadastre proteções, capacidade de interrupção na tensão aplicável, I2/In e tempo máximo de seccionamento. In=0 permite propor um calibre da série nos modelos genéricos. Curvas de fabricante em ampères absolutos exigem In fixo e identificação do modelo/documento. CC exige curva e capacidade declaradas para CC.
+7. Calcule, revise o relatório e aplique. Para várias alimentações, cadastre cada origem e use **Revisar todas as origens**. O conjunto não é aplicado se houver carga descoberta, origem pendente ou trecho compartilhado sem solução inequívoca.
+
+## Cálculos implementados
+
+- Grafo radial por terminais e trechos. As correntes das cargas são acumuladas a montante, preservando correntes diferentes nas derivações. Malhas, paralelos e ligações entre funções da fonte são bloqueados, em vez de presumir repartição de corrente.
+- Relações V/I/P para CA monofásica, bifásica de 120°, trifásica e CC. Em 3F equilibrado: `P = √3 × Ulinha × Ifundamental × cos φ`. Potência mecânica é dividida pelo rendimento. Estrela desequilibrada aceita correntes por fase e neutro; dados nominais contraditórios são rejeitados.
+- Soma fasorial das fundamentais por fase e no neutro. Para harmônicas, H3 e outras ordens 2–99 podem ser declaradas. As amplitudes agregadas usam limites superiores conservadores, sem inventar ângulos/cancelamentos. A reatância é limitada pela maior ordem declarada. O espectro deve cobrir os cenários de regime/partida; fatores térmicos e resistividade efetiva devem ser adequados ao espectro. Outros espectros não declarados não são deduzidos do símbolo.
+- Capacidade de corrente corrigida por Kt, Kg e fator térmico harmônico declarado; contagem conservadora dos condutores carregados. O cabo é rejeitado se sua declaração subestima os condutores efetivamente carregados.
+- Neutro com seção pelo menos igual à maior fase associada, além de capacidade e curto. Não se presume redução normativa do neutro. Neutro com corrente superior às fases requer declaração de proteção adequada do neutro.
+- PE por seção das fases quando o material é o mesmo (`Sfase≤16: SPE≥Sfase`; `16<Sfase≤35: SPE≥16`; acima disso `SPE≥Sfase/2`, arredondado à seção disponível), mínimo mecânico declarado e critério adiabático. Para materiais diferentes, usa k/energia de falta e mínimo mecânico próprios, sem aplicar a tabela de materiais iguais. Corrente nominal de carga não dimensiona o PE.
+- Queda de tensão acumulada desde a origem até cada carga, incluindo impedância do retorno/neutro e limite conservador harmônico. O motor aumenta seções de trechos que contribuem para a queda, sem atribuir uma única bitola ao quadro.
+- Partida de motor com múltiplo da corrente nominal, duração e cos φ de partida. A corrente de partida não é reduzida pelo fator de demanda de regime. Verifica queda e possibilidade de atuação prematura dos dispositivos a montante, mantendo outras cargas em regime.
+- `Ib ≤ In ≤ Iz` e `I2 ≤ 1,45 Iz`; capacidade de interrupção contra o curto máximo declarado. Cada trecho usa sua própria proteção a montante: um disjuntor de ramal não protege o fio que o alimenta.
+- Curto mínimo a partir de tensão mínima e laço externo + fase/retorno. Em TN, verifica o tempo de seccionamento declarado. Em TT, considera DR próprio ou herdado a montante, `RA × IΔn ≤ UL`, corrente nominal, tempo e documento; adota limite de UL até 50 V CA / 120 V CC, exigindo valores menores quando a instalação requer. Laços L-N/L-L continuam usando proteção de sobrecorrente, sem usar DR indevidamente para esses defeitos.
+- Critério adiabático `S ≥ I√t/k`, até 5 s, com limite conservador de energia a partir do curto máximo e pior tempo garantido na faixa. Não se inventa I²t de limitação de um fabricante. Isso pode resultar em seções maiores que uma seleção baseada em ensaios específicos.
+- Seletividade por associação documentada até o curto máximo ou comparação de envelopes mínimo/máximo log-lineares em toda a faixa declarada, incluindo seus pontos de mudança. Curvas genéricas B/C/D usam somente limites garantidos IEC 60898-1; calibres crescentes não comprovam seletividade. O relatório distingue associação ensaiada de separação de envelopes, que ainda requer conferir limitação/cascata. Faixas fora de curvas documentadas ficam pendentes.
+
+## Gravação e automação
+
+Aplicar grava seção, função, cor técnica, tensão e registro de cálculo no condutor. Roteamento, rótulo visível, numeração e vínculo nativo de cabo não são alterados. Dados, perfis e resultados ficam no `.qet`; cada aplicação pode ser desfeita/refeita em um lote.
+
+**Recalcular todas as origens cadastradas ao salvar** começa desativado. Quando ativado e salvo nos parâmetros, o próximo salvamento verifica o conjunto novamente. Seções próprias do motor são recalculadas; seções manuais permanecem fixas. Edições manuais em uma seção automática passam a ser reconhecidas como manuais. Havendo erro ou pendência, as seções anteriores são mantidas e o projeto pode ser salvo para correção. Relatórios marcam resultados antigos como **RECALCULAR**. Documentação técnica automática existente é regenerada quando o estado muda. Não há laço de recálculo em salvamentos sem alterações nem alterações a cada tecla.
+
+Após alterações em cargas, topologia, perfis, parâmetros ou seções, os registros são conferidos contra uma assinatura dos dados e contra as seções efetivamente gravadas. Os relatórios acrescentam tabelas de alimentações/cargas e proteções/coordenação e incluem pendências do recálculo automático.
+
+## Condições e alcance
+
+O perfil inicial Cu/PVC/B1 é conservador e herdado, começa sem confirmação e não substitui as tabelas aplicáveis. Outros materiais, métodos, temperaturas e espectros dependem de perfis e fatores documentados. O software não consulta automaticamente catálogos nem mede comprimentos, impedância ou curto da instalação.
+
+O modelo é radial: não resolve fluxo de potência em malhas, paralelismo de fontes/condutores, transferência automática entre fontes, todos os estados possíveis de intertravamentos, ligação interna não declarada de motores ou conversão automática de cargas entre primário/secundário. A origem deve delimitar cada domínio; cargas de outro domínio não recebem sua tensão/seção. Retornos compartilhados que receberiam correntes não calculadas são bloqueados. IT/primeiro e segundo defeito exigem estudo específico e permanecem pendentes.
+
+Os exemplos incluídos usam dados didáticos explicitamente identificados, inclusive curvas e associações. Comprovam o comportamento do aplicativo e não constituem catálogo comercial ou projeto executivo. A avaliação matemática e dos critérios implementados é condicionada aos dados declarados; o aplicativo **não emite certificação integral de conformidade NBR 5410**. Critérios de instalação/projeto fora deste modelo e adequação das referências precisam de conferência técnica.
+
+As referências de edição e seus endereços estão no [guia industrial](README.md). A consulta de edição registrada em 23/10/2026 não equivale a validar automaticamente todos os critérios normativos deste programa.

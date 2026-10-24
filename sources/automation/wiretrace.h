@@ -50,6 +50,8 @@ struct DevicePassage {
     QString elementId, label, pinA, pinB, behaviour;
     QString page;
     bool traversable=true;
+    Terminal *terminalA=nullptr,*terminalB=nullptr;
+    Element *device=nullptr;
 };
 struct ReportHop {
     int a=-1, b=-1;
@@ -799,6 +801,7 @@ inline Snapshot scan(QETProject *project) {
                 const QString pa=normalizedPin(a->name()),pb=normalizedPin(b->name());
                 DevicePassage arc;
                 arc.a=ga;arc.b=gb;arc.elementId=shortUuid(e->uuid());
+                arc.terminalA=a;arc.terminalB=b;arc.device=e;
                 arc.label=safeText(e->actualLabel())+QStringLiteral(" ")+safeText(e->name());
                 arc.page=QString::number(folio->folioIndex()+1);
                 arc.pinA=safeText(a->name());arc.pinB=safeText(b->name());

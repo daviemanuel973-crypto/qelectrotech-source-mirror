@@ -17,7 +17,7 @@ Esta versão usa o aplicativo QElectroTech real, com integração direta no cód
 
 **Rastrear conexões elétricas** inventaria todas as folhas, fios, terminais, potenciais e vínculos nativos entre setas. **Percorrer circuito** mostra passagens por dispositivos e distingue caminhos condicionais de continuidade metálica. Pistas geométricas não são tratadas como conexões comprovadas. Bobinas, cargas e conversores não são curtos entre potenciais.
 
-**Editar dados elétricos das cargas** cadastra dados conhecidos no próprio `.qet`. O dimensionamento tenta carregar os dados quando encontra uma única carga candidata. Percursos com múltiplas cargas são bloqueados para receber uma seção única, pois o alimentador e as derivações podem ter correntes diferentes. Associações ambíguas precisam de revisão; não existe agregação automática geral de alimentadores.
+**Editar dados elétricos das cargas** cadastra dados conhecidos no próprio `.qet`. A ferramenta individual carrega os dados quando encontra uma única carga candidata e bloqueia aplicar uma seção única a várias cargas. Para dimensionar conjuntos, use **Dimensionar alimentação, derivações, neutro e PE**: o novo motor calcula correntes por trecho e distingue alimentadores e ramais.
 
 A coluna **Papel elétrico** permite declarar carga, fonte, proteção, contato/manobra, conversor ou borne. Corrente nominal de uma proteção, fonte ou componente não identificado não é interpretada como corrente de carga. Se o símbolo não for reconhecido, selecione-o e declare seu papel. Trocar os potenciais selecionados limpa os dados elétricos, a proteção e o curto-circuito do circuito anterior antes de carregar os dados do novo. Potenciais com marcações explícitas incompatíveis (por exemplo L1 e L2, ou N e PE) ficam pendentes; não recebem seção automática.
 
@@ -29,7 +29,13 @@ O núcleo calcula corrente/potência/tensão para CA monofásica, CA trifásica 
 
 A seção é gravada somente nos potenciais escolhidos. Propriedades existentes são preservadas, salvo substituição explícita. O registro do cálculo é salvo junto ao fio no `.qet`; desfazer/refazer inclui esse registro. Cor de desenho, isoladamente, não prova que um fio é PE. PE não recebe seção calculada a partir da corrente da carga.
 
-**Limites materiais:** o perfil de capacidade disponível é preliminar, cobre/PVC 70 °C, B1, sem certificação normativa; não há implementação completa de todos os métodos, materiais, harmônicos, partida de motores, coordenação/seletividade e neutro/PE. Os fatores precisam ser declarados conforme a instalação. Relatórios não apresentam o projeto como 100% dimensionado. Não usar a saída como aprovação de projeto executivo.
+**Perfil da ferramenta individual:** cobre/PVC 70 °C, B1, preliminar. O novo dimensionador de alimentações aceita perfis por trecho, tabelas de capacidade declaradas, diferentes materiais/métodos, neutro, PE, espectro harmônico, partida e curvas/associações de proteção. Seus critérios, condições e limites estão no [guia de dimensionamento](DIMENSIONAMENTO.md). Nenhuma das ferramentas certifica integralmente uma instalação pela NBR 5410.
+
+### Alimentadores, derivações, neutro e PE
+
+Abra **Industrial → Dimensionar alimentação, derivações, neutro e PE**. Cadastre a origem e seus terminais, revise as cargas rastreadas e os comprimentos físicos, agrupe fases/N/PE por cabo/circuito e confira o perfil de instalação e as proteções. A edição em lote evita repetir fatores e dados comuns em cada fio. A função **Revisar todas as origens** calcula os domínios cadastrados, incluindo CA e CC separados; **Aplicar todas verificadas** aplica o conjunto em um único lote quando todas as cargas estão cobertas e não há pendências/compartilhamentos ambíguos.
+
+Ative **Recalcular todas as origens cadastradas ao salvar** e salve os parâmetros para automatizar os próximos salvamentos. Seções geradas pelo próprio motor podem crescer/diminuir; seções manuais ficam fixas. Se você editar manualmente uma seção automática, ela passa a ser tratada como manual. Dados insuficientes mantêm as seções anteriores, registram pendências e permitem salvar o projeto. Cálculos antigos são marcados para recálculo. Documentação técnica automática existente é regenerada quando o cálculo/estado muda; folhas manuais são preservadas.
 
 ## Documentação
 
@@ -65,3 +71,5 @@ Consulta de edição em 23/10/2026: catálogo ABNT apresenta **ABNT NBR 5410:200
 A compilação Windows executa testes matemáticos, integração com classes reais QET (seleção, gravação, geometria, salvar/reabrir, desfazer/refazer, editor de bornes e documentos) e a suíte CTest. O pacote passa por abertura de um `.qet` com o plugin Qt Windows e PATH sem MSYS2, além de uma janela real do editor e seu fechamento normal. O projeto completo é usado na leitura; o exemplo de uma folha `741.qet` é usado na verificação independente da janela, para não confundir avisos das tabelas antigas com inicialização do aplicativo. Verifique o resultado da execução correspondente ao commit. `validation/build-info.json` identifica o código, os projetos usados e quais verificações passaram. A verificação automatizada não equivale a aceitação manual completa da GUI no computador do usuário. Pacotes cuja verificação de execução falhe não são publicados como portáteis válidos.
 
 A fixture industrial de integração vem do próprio QET: 50 folhas, 618 elementos e 671 fios. Seus dados são de exemplo, não do quadro do usuário. O PDF `DOCUMENTAÇÃO DO QUADRO.pdf` é referência visual; seus dados não são inseridos automaticamente na demonstração.
+
+O pacote também inclui `documentacao/dimensionamento`: exemplos nativos de um alimentador com ramais de 8 A/12 A e um domínio 24 Vcc independente, além de motor trifásico através de disjuntor/contator/relé térmico e continuações entre folhas. São **dados didáticos**, inclusive os envelopes e associações de proteção; não são um catálogo nem parâmetros para copiar para uma instalação real.

@@ -3,6 +3,7 @@
 #define QET_INDUSTRIAL_DOCUMENTATION_H
 #include "symbollegend.h"
 #include "wiretrace.h"
+#include "projectcircuitsizing.h"
 #include "../qetgraphicsitem/independenttextitem.h"
 #include "../qetgraphicsitem/qetshapeitem.h"
 #include "../factory/elementfactory.h"
@@ -64,6 +65,15 @@ inline QList<Table> tables(QETProject *project) {
     Table missing{QStringLiteral("PROPRIEDADES NÃO PREENCHIDAS / PENDÊNCIAS"),
         {"REFERÊNCIA / PÁG.","PROPRIEDADES PENDENTES","SITUAÇÃO"},{},{22,53,25}};
     QMap<QString,int> sections;
+    const auto panel=ProjectCircuitSizing::settings(project);
+    QHash<QString,bool> currentSizing;
+    auto isCurrent=[&](const QString &source) {
+        if(!currentSizing.contains(source)) {
+            auto inputs=panel;inputs["source"]=source;
+            const auto a=ProjectCircuitSizing::analyze(project,inputs,false);
+            currentSizing[source]=ProjectCircuitSizing::currentResult(a,source,panel["audit"].toObject()[source].toString());
+        }return currentSizing.value(source);
+    };
     for(int id=0;id<trace.groups.size();++id) {
         const auto &g=trace.groups.at(id);QStringList folios;
         for(Diagram *d:g.folios)folios << QString::number(d->folioIndex()+1);
@@ -92,6 +102,14 @@ inline QList<Table> tables(QETProject *project) {
                     .arg(audit.value("protection_checked").toBool()?"critérios Ib/In/Iz e I2 verificados":"PENDENTE")
                     .arg(audit.value("short_circuit_checked").toBool()?"adiabático verificado":"PENDENTE");
             }
+            if(audit.value("schema").toInt()==2) {
+                if(audit["section"].toString()!=p.m_wire_section || !isCurrent(audit["source"].toString()))
+                    assessment=QStringLiteral("RECALCULAR: seção, carga, topologia ou parâmetros mudaram após o cálculo da alimentação.");
+                else assessment=QStringLiteral("ALIMENTAÇÃO / DERIVAÇÃO: Ib=%1 A; Iz=%2 A; In=%3 A; função=%4; harmônica=%5 A; mínimo térmico=%6 mm². Critérios implementados verificados no perfil declarado: %7. Conformidade integral não certificada.")
+                    .arg(audit["current"].toDouble()).arg(audit["iz_a"].toDouble()).arg(audit["in_a"].toDouble())
+                    .arg(audit["role"].toString()).arg(audit["harmonic_a"].toDouble())
+                    .arg(audit["short_circuit_minimum_mm2"].toDouble()).arg(audit["profile"].toString());
+            }
             sizing.rows << QStringList{ref,p.m_wire_section,p.m_tension_protocol,assessment};
         }
     }
@@ -109,8 +127,34 @@ inline QList<Table> tables(QETProject *project) {
     for(const auto &h:trace.reportHops)links.rows<<QStringList{h.source,h.fromPage,h.destination,h.toPage,"Vínculo nativo QET"};
     Table issues{QStringLiteral("RELATÓRIO DE INCONSISTÊNCIAS"),{"OCORRÊNCIA","SITUAÇÃO"},{},{80,20}};
     for(const QString &warning:trace.warnings)issues.rows<<QStringList{warning,"REVISAR"};
+    for(const auto &warning:panel["last_auto_issues"].toArray())issues.rows<<QStringList{
+        QStringLiteral("DIMENSIONAMENTO AUTOMÁTICO: ")+warning.toString(),"PENDENTE"};
     if(issues.rows.isEmpty())issues.rows<<QStringList{"Sem inconsistências topológicas detectadas; dados elétricos e estados ainda exigem revisão.","CONDICIONADO"};
-    return {materials,devices,terminals,wires,sizes,circuits,links,sizing,missing,issues};
+    QList<Table> result{materials,devices,terminals,wires,sizes,circuits,links,sizing,missing,issues};
+    const auto summaries=panel["results"].toObject();
+    if(!summaries.isEmpty()) {
+        Table loads{"ALIMENTADORES E CARGAS — DIMENSIONAMENTO",{"ORIGEM / CARGA","POTÊNCIA W","QUEDA TOTAL %","PARTIDA %","IK MÍN. A","SITUAÇÃO"},{},{36,12,12,10,12,18}};
+        Table protections{"PROTEÇÕES E COORDENAÇÃO",{"ORIGEM / DISPOSITIVO","IB A","IN A","I2 A","VERIFICAÇÕES / COORDENAÇÃO"},{},{36,10,10,10,34}};
+        for(auto it=summaries.begin();it!=summaries.end();++it) {
+            const auto s=it.value().toObject();const bool valid=isCurrent(it.key());
+            for(const auto &v:s["loads"].toArray()) {
+                const auto l=v.toObject();loads.rows<<QStringList{s["source"].toString()+" / "+l["reference"].toString(),
+                    QString::number(l["power"].toDouble()),QString::number(l["drop"].toDouble()),QString::number(l["start_drop"].toDouble()),
+                    QString::number(l["fault_min"].toDouble()),valid?"Critérios declarados verificados":"RECALCULAR"};
+            }
+            for(const auto &v:s["protections"].toArray()) {
+                const auto p=v.toObject();protections.rows<<QStringList{s["source"].toString()+" / "+p["reference"].toString(),
+                    QString::number(p["current"].toDouble()),QString::number(p["in"].toDouble()),QString::number(p["i2"].toDouble()),
+                    valid?QStringLiteral("Interrupção: %1; térmico: %2; seccionamento: %3. Calibre proposto/ajuste declarado; conferir instalação.")
+                        .arg(p["breaking"].toBool()?"verificado":"pendente",p["thermal"].toBool()?"verificado":"pendente",p["ads"].toBool()?"verificado":"pendente"):
+                        QStringLiteral("RECALCULAR — parâmetros/topologia alterados")};
+            }
+            for(const auto &v:s["coordination"].toArray())protections.rows<<QStringList{s["source"].toString(),{},{},{},
+                valid?v.toString():QStringLiteral("RECALCULAR — ")+v.toString()};
+        }
+        result<<loads<<protections;
+    }
+    return result;
 }
 inline QList<int> widths(const Table&t,int total) {
     QList<int> out;int used=0,sum=0;for(int w:t.weights)sum+=w;
@@ -331,6 +375,10 @@ inline int createSheets(QETProject *project,Section section=Section::All) {
 }
 inline int createMaterials(QETProject *project) { return createSheets(project,Section::Materials); }
 inline int createSymbols(QETProject *project) { return createSheets(project,Section::Symbols); }
+inline bool hasTechnicalSheets(QETProject *project) {
+    if(project)for(Diagram *d:project->diagrams())if(generated(d) && sheetKind(d)=="other")return true;
+    return false;
+}
 inline QString autoRefreshKey() { return QStringLiteral("qet_auto_refresh_lists"); }
 inline bool autoRefreshEnabled(QETProject *project) {
     return project && project->projectProperties().value(autoRefreshKey()).toBool();

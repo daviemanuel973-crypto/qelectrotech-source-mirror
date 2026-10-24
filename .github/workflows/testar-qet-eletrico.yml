@@ -118,6 +118,7 @@ jobs:
         shell: msys2 {0}
         env:
           QT_QPA_PLATFORM: offscreen
+          QET_RADIAL_DELIVERY_DIR: ${{ github.workspace }}/build/radial-validation
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE/build"
@@ -136,9 +137,19 @@ jobs:
           fi
           exit "$qet_ctest_status"
 
+      - name: Conferir demonstracoes nativas do dimensionamento
+        id: dimensionamento
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          test -s "$GITHUB_WORKSPACE/build/radial-validation/QET-Dimensionamento-Demonstracao.qet"
+          test -s "$GITHUB_WORKSPACE/build/radial-validation/QET-Dimensionamento-Documentacao.pdf"
+          test -s "$GITHUB_WORKSPACE/build/radial-validation/QET-Motor-Trifasico-Demonstracao.qet"
+          test -s "$GITHUB_WORKSPACE/build/radial-validation/Relatorio-Motor-Trifasico.txt"
+
       - name: Gerar pasta portatil Windows com dependencias
         id: pacote
-        if: ${{ always() && steps.compilacao.outcome == 'success' }}
+        if: ${{ success() && steps.compilacao.outcome == 'success' && steps.integracao.outcome == 'success' && steps.testes.outcome == 'success' && steps.dimensionamento.outcome == 'success' }}
         shell: msys2 {0}
         env:
           QET_NATIVE_TESTS: ${{ steps.integracao.outcome }}
@@ -172,9 +183,11 @@ jobs:
           cp -r "$GITHUB_WORKSPACE/examples" "$DEST/examples" || true
           cp "$GITHUB_WORKSPACE/misc/Abrir-QET-Industrial.bat" "$DEST/Abrir QElectroTech.bat"
           cp "$GITHUB_WORKSPACE/docs/industrial/README.md" "$DEST/LEIA-ME.md"
+          cp "$GITHUB_WORKSPACE/docs/industrial/DIMENSIONAMENTO.md" "$DEST/DIMENSIONAMENTO.md"
           mkdir -p "$DEST/validation" "$DEST/documentacao"
           cp "$GITHUB_WORKSPACE/build/industrial-validation/results.txt" "$DEST/validation/" 2>/dev/null || true
           cp "$GITHUB_WORKSPACE/build/industrial-validation/"QET-Industrial-* "$DEST/documentacao/" 2>/dev/null || true
+          cp -r "$GITHUB_WORKSPACE/build/radial-validation" "$DEST/documentacao/dimensionamento"
           cp "$GITHUB_WORKSPACE/build/Testing/Temporary/LastTest.log" "$DEST/validation/" 2>/dev/null || true
           git rev-parse HEAD > "$DEST/validation/source-commit.txt"
           find "$GITHUB_WORKSPACE/build/lang" -maxdepth 1 -name 'qet_*.qm' -exec cp {} "$DEST/lang/" \; 2>/dev/null || true
@@ -183,7 +196,7 @@ jobs:
           done
           test -s "$DEST/bin/QElectroTech.exe"
           test -d "$DEST/elements"
-          printf 'QElectroTech em desenvolvimento - fonte: feature/dados-eletricos-dimensionamento\nCommit: %s\nAções: Documentar bornes; Gerar simbologia gráfica e tabelas; Dimensionamento preliminar de condutores; Rastrear circuitos e setas entre folhas.\nAVISO: pacote compilado; NÃO significa que os testes passaram. Confira os resultados do job no GitHub Actions. O cálculo NÃO substitui NBR 5410 nem revisão profissional.\n' "$(git rev-parse HEAD)" > "$DEST/LEIA-ME-STATUS-VALIDACAO.txt"
+          printf 'QElectroTech Industrial\nCommit: %s\nAções: Dimensionar alimentação/derivações/neutro/PE; recalcular ao salvar; documentar bornes; materiais e simbologia automáticos; rastrear circuitos e setas.\nTestes matemáticos, integração nativa e CTest passaram antes do empacotamento. O pacote também exige abertura real no Windows. Consulte validation/build-info.json.\nCálculos condicionados aos perfis/dados declarados; sem certificação integral NBR 5410.\n' "$(git rev-parse HEAD)" > "$DEST/LEIA-ME-STATUS-VALIDACAO.txt"
           cd "$GITHUB_WORKSPACE"
           /ucrt64/bin/python.exe misc/verify_windows_portable.py "$DEST"
           echo 'Pacote preparado e inicialização isolada verificada.'

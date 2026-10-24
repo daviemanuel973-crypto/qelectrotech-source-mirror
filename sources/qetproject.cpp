@@ -2898,8 +2898,13 @@ QETResult QETProject::write(bool overwrite_changed)
 						  .arg(QLocale::system().toString(when, QLocale::ShortFormat))));
 	}
 
-	if (m_modified || m_undo_stack->index() != m_stamped_undo_index)
-		IndustrialDocumentation::refreshListsBeforeSave(this);
+	if (m_modified || m_undo_stack->index() != m_stamped_undo_index) {
+		const bool sizing_changed = ProjectCircuitSizing::refreshBeforeSave(this);
+		if (sizing_changed && IndustrialDocumentation::hasTechnicalSheets(this))
+			IndustrialDocumentation::createSheets(this);
+		else
+			IndustrialDocumentation::refreshListsBeforeSave(this);
+	}
 
 		//The file as it was goes among its previous versions first
 		//(Settings > General > Projects); a copy that fails does not stop

@@ -92,7 +92,8 @@ env=os.environ.copy()
 env['PATH']=str(exe.parent)+os.pathsep+str(pathlib.Path(env.get('SystemRoot',r'C:\Windows'))/'System32')
 for key in ['QT_PLUGIN_PATH','QML2_IMPORT_PATH','QML_IMPORT_PATH']:env.pop(key,None)
 env['QT_QPA_PLATFORM']='windows'
-fixture=root/'documentacao/QET-Industrial-Demonstracao.qet'
+fixture=root/'documentacao/dimensionamento/QET-Dimensionamento-Demonstracao.qet'
+if not fixture.exists():fixture=root/'documentacao/QET-Industrial-Demonstracao.qet'
 if not fixture.exists():fixture=root/'examples/industrial.qet'
 if not fixture.exists():raise SystemExit('No actual QET project available for runtime test')
 with tempfile.TemporaryDirectory(prefix='qet portable space ') as work:
