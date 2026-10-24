@@ -45,6 +45,7 @@ class RadialSizingTest:public QObject {
 private slots:
     void feederAndBranches();void missingAndAmbiguous();void neutralAndHarmonics();
     void cumulativeDrop();void protectionAndFault();void curvesAndStarting();void profilesAndManual();
+    void roundoffAtProtectionRating();
 };
 void RadialSizingTest::feederAndBranches() {
     const auto r=calculate(example());
@@ -156,6 +157,15 @@ void RadialSizingTest::profilesAndManual() {
     n=example();n.profile.table[1].section=1.5;QVERIFY(!calculate(n).calculated);
     n=example();n.loads[0].current=0;n.loads[0].power=1840;n.loads[0].mechanical=true;n.loads[0].efficiency=.8;
     r=calculate(n);QVERIFY2(r.ready,qPrintable((r.errors+r.pending).join('\n')));QCOMPARE(get(r,"A-L").current,10.);
+}
+void RadialSizingTest::roundoffAtProtectionRating() {
+    auto n=example();n.nodes=6;n.edges={wire("L",0,3,"W"),wire("N",1,4,"W"),wire("PE",2,5,"W")};
+    n.loads.clear();n.selectivity.clear();n.protections["Q0"].fixedIn=2;
+    for(int i=0;i<20;++i){Load l;l.id=QString::number(i);l.ports={3,4};l.pe=5;l.voltage=230;l.current=.1;l.pf=1;l.harmonic3=0;n.loads<<l;}
+    auto r=calculate(n);QVERIFY2(r.ready,qPrintable((r.errors+r.pending).join('\n')));QCOMPARE(r.protections["Q0"].nominal,2.);
+    QVERIFY(std::abs(get(r,"L").current-2)<1e-12);
+    n.protections["Q0"].fixedIn=0;r=calculate(n);QVERIFY(r.ready);QCOMPARE(r.protections["Q0"].nominal,2.);
+    n.loads[0].current=.101;QVERIFY(!calculate([&](){auto fixed=n;fixed.protections["Q0"].fixedIn=2;return fixed;}()).ready);
 }
 QTEST_GUILESS_MAIN(RadialSizingTest)
 #include "tst_radialsizing.moc"

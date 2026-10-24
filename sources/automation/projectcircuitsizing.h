@@ -334,7 +334,7 @@ inline Analysis analyze(QETProject *project,const QJsonObject &data,bool overwri
     QJsonObject topology;
     for(const auto &e:net.edges)topology.insert(e.id,QJsonArray{nodeIds[e.a],nodeIds[e.b],int(e.kind),e.peContinuous});
     input["topology"]=topology;input["load_data"]=signatureLoads;
-    input["algorithm_version"]=1;
+    input["algorithm_version"]=2;
     a.fingerprint=QString::fromLatin1(QCryptographicHash::hash(QJsonDocument(input).toJson(QJsonDocument::Compact),QCryptographicHash::Sha256).toHex());
     return a;
 }
@@ -397,7 +397,7 @@ inline void applicationCommands(QETProject *project,const QJsonObject &data,cons
         after.m_wire_section=QString::number(w.section,'g',12).replace('.',',')+" mm²";
         RadialSizing::Edge edge;for(const auto &e:net.edges)if(e.id==w.id)edge=e;
         const auto p=net.profiles.value(edge.profile,net.profile);
-        QJsonObject record{{"schema",2},{"algorithm_version",1},{"source",data["source"]},{"fingerprint",a.fingerprint},
+        QJsonObject record{{"schema",2},{"algorithm_version",2},{"source",data["source"]},{"fingerprint",a.fingerprint},
             {"section",after.m_wire_section},{"current",w.current},{"iz_a",w.ampacity},{"role",roleName(w.role)},
             {"protection",w.protection},{"in_a",a.result.protections.value(w.protection).nominal},
             {"short_circuit_minimum_mm2",w.shortCircuitMinimum},{"harmonic_a",w.harmonic},

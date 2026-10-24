@@ -100,6 +100,11 @@ struct Result {
 };
 inline bool positive(double x) { return std::isfinite(x) && x>0; }
 inline bool nonnegative(double x) { return std::isfinite(x) && x>=0; }
+// Ignore only machine roundoff, not engineering/measurement uncertainty.
+inline bool exceeds(double a,double b) {
+    if(!std::isfinite(a) || !std::isfinite(b))return a>b;
+    return a>b && a-b>128*std::numeric_limits<double>::epsilon()*std::max({1.,std::abs(a),std::abs(b)});
+}
 inline bool phase(Role r) { return r==L1 || r==L2 || r==L3 || r==Plus; }
 inline QString roleName(Role r) { return QStringList{"L1","L2","L3","N","PE","+","−"}.value(r); }
 inline bool validProfile(const Profile &p) {
@@ -430,8 +435,8 @@ inline Result calculate(const Network &net) {
            !nonnegative(p.earthResistance) || !nonnegative(p.touchLimit))fail("Dados numéricos da proteção inválidos: "+it.key());
         double previous=0;for(double rating:p.ratings){if(!positive(rating) || rating<=previous)fail("Série de calibres inválida: "+it.key());previous=rating;}
         if(p.fixedIn>0)pr.nominal=p.fixedIn;
-        else for(double rating:p.ratings)if(positive(rating) && rating>=pr.current) {pr.nominal=rating;break;}
-        if(!positive(pr.nominal) || pr.nominal<pr.current || !positive(p.i2Multiple) || p.i2Multiple<1)
+        else for(double rating:p.ratings)if(positive(rating) && !exceeds(pr.current,rating)) {pr.nominal=rating;break;}
+        if(!positive(pr.nominal) || exceeds(pr.current,pr.nominal) || !positive(p.i2Multiple) || p.i2Multiple<1)
             fail("Proteção não suporta a corrente de projeto: "+it.key());
         if(p.points.isEmpty() && QStringList{"B","C","D"}.contains(p.curve) && p.i2Multiple<1.45)
             fail("I2/In abaixo do limite garantido do modelo genérico IEC 60898-1: "+it.key());
@@ -467,7 +472,7 @@ inline Result calculate(const Network &net) {
         for(int ix=std::max(0,index[ei]);ix<profile(ei).table.size();++ix) {
             const double s=profile(ei).table[ix].section,iz=capacity(ei,ix);
             if(e.fixedSection>0 && std::abs(s-e.fixedSection)>1e-8)continue;
-            if(s+1e-8<minimum || (role!=PE && (amps[ei]>iz || pr.nominal>iz || pr.i2>1.45*iz)))continue;
+            if(s+1e-8<minimum || (role!=PE && (exceeds(amps[ei],iz) || exceeds(pr.nominal,iz) || exceeds(pr.i2,1.45*iz))))continue;
             if(role!=PE && !positive(iz))continue;
             index[ei]=ix;return true;
         }
