@@ -53,6 +53,18 @@ int main(int argc, char **argv) {
     QET::QetMessageBox::setNonInteractive(true);
     QFontDatabase::addApplicationFont(":/fonts/LiberationSans-Regular.ttf");
     try {
+        const QString longDescription=QStringLiteral("Descrição do borne X5: conexão de proteção 🔌 e revisão. ").repeated(160);
+        const QStringList longRow{QStringLiteral("X5"),longDescription};
+        const QList<int> columnWidths{80,180};
+        const auto parts=IndustrialDocumentation::splitNativeRow(longRow,columnWidths,120);
+        require(parts.size()>1,"long terminal descriptions continue across native rows");
+        QStringList restored{QString(),QString()};
+        for(const auto &part:parts) {
+            require(IndustrialDocumentation::nativeRowHeight(part,columnWidths)<=120,
+                    "every continued row fits its printable page");
+            for(int col=0;col<part.size();++col)restored[col]+=part[col];
+        }
+        require(restored==longRow,"pagination preserves every description character, including Unicode");
         qputenv("QET_EAGER_FOLIOS", "1");
         QETProject project(QString::fromLocal8Bit(argv[1]));
         require(project.state() == QETProject::Ok, "fixture opened");
@@ -61,6 +73,24 @@ int main(int argc, char **argv) {
         for (Diagram *d : project.diagrams())
             wires.append(DiagramContent(d, false).conductors());
         require(!wires.isEmpty(), "fixture has conductors");
+        Element *roleDevice=wires.first()->terminal1->parentElement();
+        require(roleDevice,"fixture offers an actual device for electrical roles");
+        const auto savedRoleData=roleDevice->elementInformations();
+        auto roleData=savedRoleData;
+        roleData.addValue("qet_current_a","25",false);
+        roleData.addValue("qet_electrical_role","protection",false);
+        roleDevice->setElementInformations(roleData);
+        require(!ElectricalData::load(roleDevice),"protector nominal current is not a load");
+        roleData.addValue("qet_electrical_role","source",false);
+        roleDevice->setElementInformations(roleData);
+        require(!ElectricalData::load(roleDevice),"source current rating is not a downstream load");
+        roleData.addValue("qet_electrical_role","unknown",false);
+        roleDevice->setElementInformations(roleData);
+        require(!ElectricalData::load(roleDevice),"unknown device current is not invented load evidence");
+        roleData.addValue("qet_electrical_role","load",false);
+        roleDevice->setElementInformations(roleData);
+        require(ElectricalData::load(roleDevice),"explicit load role is used regardless of symbol naming");
+        roleDevice->setElementInformations(savedRoleData);
         QHash<Conductor *, QPainterPath> paths;
         QHash<Conductor *, QString> labels;
         QHash<Conductor *, ConductorProperties> old;
@@ -74,6 +104,19 @@ int main(int argc, char **argv) {
         // sizing or mutation. Every wire must map to exactly one potential.
         const auto topology=WireTrace::scan(&project);
         require(topology.complete,"every conductor and terminal endpoint is indexed");
+        bool checkedConflict=false;
+        for(const auto &group:topology.groups) {
+            if(group.conductors.size()<2)continue;
+            Conductor *a=group.conductors[0],*b=group.conductors[1];
+            auto pa=a->properties(),pb=b->properties();
+            pa.m_function="L1";pb.m_function="L2";a->setProperties(pa);b->setProperties(pb);
+            const auto conflicting=WireTrace::scan(&project);
+            require(!conflicting.canSizeGroup(conflicting.groupByConductor.value(a,-1)),
+                    "a continuous potential with conflicting explicit phases cannot be sized");
+            a->setProperties(old.value(a));b->setProperties(old.value(b));
+            checkedConflict=true;break;
+        }
+        require(checkedConflict,"phase-conflict regression exercised a real branched potential");
         // Broken cross-folio arrow links do NOT invalidate the whole
         // project's wire inventory; only their potentials are unsafe.
         require(topology.groupByConductor.size()==wires.size(),
@@ -534,6 +577,13 @@ int main(int argc, char **argv) {
                             if (sawPicker && !dialogSubmitted) {
                                 dialogSubmitted=true;
                                 const auto fields=d->findChildren<QDoubleSpinBox*>();
+                                const auto combos=d->findChildren<QComboBox*>();
+                                require(fields.at(3)->value()==0. && fields.at(8)->value()==0. &&
+                                        fields.at(9)->value()==0. && fields.at(10)->value()==0.,
+                                        "changing circuits clears power factor, protection and fault data");
+                                require(combos.at(0)->currentIndex()==1 && combos.at(1)->currentIndex()==0,
+                                        "changing circuits clears the previous supply and known-pair choice");
+                                combos.at(0)->setCurrentIndex(2);combos.at(1)->setCurrentIndex(1);
                                 fields.at(0)->setValue(24.);fields.at(2)->setValue(.24);
                                 d->findChild<QDoubleSpinBox*>("qet_physical_length_m")->setValue(20.);
                                 d->findChild<QCheckBox*>("qet_profile_confirmed")->setChecked(true);
@@ -621,6 +671,9 @@ int main(int argc, char **argv) {
                             if (label->text().contains(QStringLiteral("Resultado:")))
                                 previewFound=true;
                         require(previewFound,"live calculation displayed");
+                        fields.at(8)->setValue(32.);fields.at(9)->setValue(46.4);
+                        fields.at(10)->setValue(1000.);fields.at(11)->setValue(.1);
+                        fields.at(12)->setValue(115.);
                         guiHistory << QStringLiteral("input-ready scope=%1")
                             .arg(combos.at(2)->currentIndex());
                         // Submission is performed in the next poll cycle,

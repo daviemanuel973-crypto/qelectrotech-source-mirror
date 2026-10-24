@@ -19,6 +19,8 @@ Esta versão usa o aplicativo QElectroTech real, com integração direta no cód
 
 **Editar dados elétricos das cargas** cadastra dados conhecidos no próprio `.qet`. O dimensionamento tenta carregar os dados quando encontra uma única carga candidata. Percursos com múltiplas cargas são bloqueados para receber uma seção única, pois o alimentador e as derivações podem ter correntes diferentes. Associações ambíguas precisam de revisão; não existe agregação automática geral de alimentadores.
 
+A coluna **Papel elétrico** permite declarar carga, fonte, proteção, contato/manobra, conversor ou borne. Corrente nominal de uma proteção, fonte ou componente não identificado não é interpretada como corrente de carga. Se o símbolo não for reconhecido, selecione-o e declare seu papel. Trocar os potenciais selecionados limpa os dados elétricos, a proteção e o curto-circuito do circuito anterior antes de carregar os dados do novo. Potenciais com marcações explícitas incompatíveis (por exemplo L1 e L2, ou N e PE) ficam pendentes; não recebem seção automática.
+
 ### Pré-dimensionamento
 
 Selecione fios no desenho ou potenciais no rastreador. Informe os dados ausentes, inclusive comprimento físico, e confirme o perfil apresentado. O cálculo não usa o comprimento desenhado. Sem seleção, é possível apenas classificar; não se aplica uma única bitola ao quadro inteiro.
@@ -35,6 +37,8 @@ A seção é gravada somente nos potenciais escolhidos. Propriedades existentes 
 
 **Gerar documentação em folhas editáveis** acrescenta folhas nativas ao projeto com textos e formas editáveis. A legenda usa gravações vetoriais do próprio símbolo em formas gráficas, sem criar componentes elétricos nem novas unidades de material. A geração pode ser desfeita/refeita em um único lote. As folhas são uma fotografia dos dados no momento da geração; depois de editar o projeto, regenere as folhas. Não são tabelas com atualização automática contínua.
 
+Descrições extensas continuam em novas linhas/folhas com cabeçalhos repetidos, preservando o texto, inclusive caracteres Unicode, dentro das margens. As tabelas nativas antigas do projeto industrial de exemplo podem emitir avisos próprios de capacidade; isso é separado das novas folhas documentais paginadas e não foi silenciado.
+
 Produtos só são agrupados quando fabricante, código e modelo permitem identificar equivalência. Ocorrências sem fabricante/código permanecem separadas. Contatos escravos vinculados a um mestre não viram produtos físicos adicionais. Setas de referência entre folhas não entram como unidades de material. Dados comerciais ausentes permanecem pendentes.
 
 O projeto original continua abrindo no formato `.qet`. Formas documentais com o campo adicional `qet_symbol_vector` precisam desta versão para exibir o pictograma; versões anteriores do QET podem mostrar apenas o contorno da forma. PDF preserva a representação vetorial.
@@ -46,6 +50,6 @@ Consulta de edição em 23/10/2026: catálogo ABNT apresenta **ABNT NBR 5410:200
 - https://www.abntcatalogo.com.br/
 - https://webstore.iec.ch/en/publication/103734
 
-A compilação Windows executa testes matemáticos, integração com classes reais QET (seleção, gravação, geometria, salvar/reabrir, desfazer/refazer, editor de bornes e documentos) e a suíte CTest. O pacote é verificado abrindo um `.qet` com o plugin Qt Windows e PATH sem MSYS2. Verifique o resultado da execução correspondente ao commit. A verificação automatizada de abertura não equivale a aceitação manual completa da GUI no computador do usuário.
+A compilação Windows executa testes matemáticos, integração com classes reais QET (seleção, gravação, geometria, salvar/reabrir, desfazer/refazer, editor de bornes e documentos) e a suíte CTest. O pacote passa por abertura de um `.qet` com o plugin Qt Windows e PATH sem MSYS2, além de uma janela real do editor e seu fechamento normal. O projeto completo é usado na leitura; o exemplo de uma folha `741.qet` é usado na verificação independente da janela, para não confundir avisos das tabelas antigas com inicialização do aplicativo. Verifique o resultado da execução correspondente ao commit. `validation/build-info.json` identifica o código, os projetos usados e quais verificações passaram. A verificação automatizada não equivale a aceitação manual completa da GUI no computador do usuário. Pacotes cuja verificação de execução falhe não são publicados como portáteis válidos.
 
 A fixture industrial de integração vem do próprio QET: 50 folhas, 618 elementos e 671 fios. Seus dados são de exemplo, não do quadro do usuário. O PDF `DOCUMENTAÇÃO DO QUADRO.pdf` é referência visual; seus dados não são inseridos automaticamente na demonstração.

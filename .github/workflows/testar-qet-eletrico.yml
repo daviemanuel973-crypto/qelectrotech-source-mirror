@@ -2,7 +2,17 @@ name: Testar QET entradas eletricas e dimensionamento
 
 on:
   workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Branch ou commit industrial a compilar
+        default: feature/dados-eletricos-dimensionamento
+        type: string
   workflow_call:
+    inputs:
+      source_ref:
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -16,7 +26,7 @@ jobs:
         with:
           submodules: recursive
           fetch-depth: 1
-          ref: feature/dados-eletricos-dimensionamento
+          ref: ${{ inputs.source_ref || github.event.pull_request.head.sha || github.sha }}
 
       - name: Instalar ambiente Windows (MSYS2, Qt6 e KDE6)
         uses: msys2/setup-msys2@v2
@@ -26,7 +36,7 @@ jobs:
           cache: true
           install: >-
             git
-            python
+            mingw-w64-ucrt-x86_64-python
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-cmake
             mingw-w64-ucrt-x86_64-ninja
@@ -85,6 +95,7 @@ jobs:
           echo "Executavel compilado: $EXE"
 
       - name: Testar propriedades reais do QET em projeto (salvar/reabrir, desfazer e geometria)
+        id: integracao
         shell: msys2 {0}
         env:
           QT_QPA_PLATFORM: offscreen
@@ -93,15 +104,17 @@ jobs:
           cd "$GITHUB_WORKSPACE"
           EXE=$(find "$GITHUB_WORKSPACE/build" -maxdepth 3 -iname 'qelectrotech.exe' | head -1)
           test -s "$EXE"
-          python3 tests/qttest/run_lazy_folios_probe.py \
+          /ucrt64/bin/python.exe tests/qttest/run_lazy_folios_probe.py \
             --build "$GITHUB_WORKSPACE/build" \
             --binary "$EXE" \
             --source "$GITHUB_WORKSPACE/tests/qttest/wire_properties_probe.cpp" \
-            --fixture "$GITHUB_WORKSPACE/examples/industrial.qet"
-          test -s "$GITHUB_WORKSPACE/build/lazy-folios/results.txt"
-          grep -q 'PASS QET native integration' "$GITHUB_WORKSPACE/build/lazy-folios/results.txt"
+            --fixture "$GITHUB_WORKSPACE/examples/industrial.qet" \
+            --output-dir "$GITHUB_WORKSPACE/build/industrial-validation"
+          test -s "$GITHUB_WORKSPACE/build/industrial-validation/results.txt"
+          grep -q 'PASS QET native integration' "$GITHUB_WORKSPACE/build/industrial-validation/results.txt"
 
       - name: Rodar testes automatizados disponiveis
+        id: testes
         shell: msys2 {0}
         env:
           QT_QPA_PLATFORM: offscreen
@@ -111,8 +124,12 @@ jobs:
           ctest --output-on-failure --timeout 300 --no-tests=error
 
       - name: Gerar pasta portatil Windows com dependencias
+        id: pacote
         if: ${{ always() && steps.compilacao.outcome == 'success' }}
         shell: msys2 {0}
+        env:
+          QET_NATIVE_TESTS: ${{ steps.integracao.outcome }}
+          QET_CTEST: ${{ steps.testes.outcome }}
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE"
@@ -143,8 +160,10 @@ jobs:
           cp "$GITHUB_WORKSPACE/misc/Abrir-QET-Industrial.bat" "$DEST/Abrir QElectroTech.bat"
           cp "$GITHUB_WORKSPACE/docs/industrial/README.md" "$DEST/LEIA-ME.md"
           mkdir -p "$DEST/validation" "$DEST/documentacao"
-          cp "$GITHUB_WORKSPACE/build/lazy-folios/results.txt" "$DEST/validation/" 2>/dev/null || true
-          cp "$GITHUB_WORKSPACE/build/lazy-folios/"QET-Industrial-* "$DEST/documentacao/" 2>/dev/null || true
+          cp "$GITHUB_WORKSPACE/build/industrial-validation/results.txt" "$DEST/validation/" 2>/dev/null || true
+          cp "$GITHUB_WORKSPACE/build/industrial-validation/"QET-Industrial-* "$DEST/documentacao/" 2>/dev/null || true
+          cp "$GITHUB_WORKSPACE/build/Testing/Temporary/LastTest.log" "$DEST/validation/" 2>/dev/null || true
+          git rev-parse HEAD > "$DEST/validation/source-commit.txt"
           find "$GITHUB_WORKSPACE/build/lang" -maxdepth 1 -name 'qet_*.qm' -exec cp {} "$DEST/lang/" \; 2>/dev/null || true
           for file in "$GITHUB_WORKSPACE"/LICENSE* "$GITHUB_WORKSPACE"/ELEMENTS.LICENSE; do
             test -f "$file" && cp "$file" "$DEST/" || true
@@ -153,11 +172,11 @@ jobs:
           test -d "$DEST/elements"
           printf 'QElectroTech em desenvolvimento - fonte: feature/dados-eletricos-dimensionamento\nCommit: %s\nAções: Documentar bornes; Gerar simbologia gráfica e tabelas; Dimensionamento preliminar de condutores; Rastrear circuitos e setas entre folhas.\nAVISO: pacote compilado; NÃO significa que os testes passaram. Confira os resultados do job no GitHub Actions. O cálculo NÃO substitui NBR 5410 nem revisão profissional.\n' "$(git rev-parse HEAD)" > "$DEST/LEIA-ME-STATUS-VALIDACAO.txt"
           cd "$GITHUB_WORKSPACE"
-          python3 misc/verify_windows_portable.py "$DEST"
+          /ucrt64/bin/python.exe misc/verify_windows_portable.py "$DEST"
           echo 'Pacote preparado e inicialização isolada verificada.'
 
       - name: Disponibilizar download do aplicativo Windows
-        if: ${{ always() && steps.compilacao.outcome == 'success' }}
+        if: ${{ always() && steps.pacote.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: QET-WINDOWS-COMPILADO-${{ job.status }}
@@ -173,5 +192,5 @@ jobs:
           path: |
             build/CMakeFiles/*.log
             build/Testing/Temporary/*.log
-            build/lazy-folios/results.txt
+            build/industrial-validation/results.txt
           if-no-files-found: ignore

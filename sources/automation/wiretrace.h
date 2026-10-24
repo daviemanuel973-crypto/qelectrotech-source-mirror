@@ -645,6 +645,22 @@ inline Snapshot scan(QETProject *project) {
         }
         group.declaredData.removeDuplicates();
         group.declaredData.sort();
+        QSet<QString> explicitFunctions;
+        auto recordFunction=[&](QString value) {
+            value=value.trimmed().toUpper();
+            if(value=="P.E.")value="PE";
+            if(value=="L1" || value=="L2" || value=="L3" || value=="N" || value=="PE")
+                explicitFunctions.insert(value);
+        };
+        for(Conductor *wire:group.conductors)recordFunction(wire->properties().m_function);
+        for(Terminal *pin:group.terminals)recordFunction(pin->name());
+        if(explicitFunctions.size()>1) {
+            QStringList conflicting=explicitFunctions.values();conflicting.sort();
+            snap.unsafeGroups.insert(groupId);
+            snap.warnings<<QStringLiteral("Potencial %1 contém funções explícitas incompatíveis (%2). "
+                "Corrija as ligações ou confirme um condutor combinado antes de dimensionar.")
+                .arg(groupId+1).arg(conflicting.join(", "));
+        }
         if (group.spansFolios()) ++snap.multiFolioPotentials;
         if(group.hasUnconnectedEndpoint) snap.unsafeGroups.insert(groupId);
         snap.groups << group;

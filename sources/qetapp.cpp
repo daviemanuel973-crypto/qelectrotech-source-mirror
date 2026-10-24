@@ -22,6 +22,7 @@
 #include "ui/configpage/configpages.h"
 #include "editor/ui/qetelementeditor.h"
 #include "elementscollectioncache.h"
+#include "ElementsCollection/elementscollectionmodel.h"
 #include "factory/elementfactory.h"
 #include "factory/elementpicturefactory.h"
 #include "projectview.h"
@@ -211,6 +212,13 @@ QETApp::QETApp() :
 */
 QETApp::~QETApp()
 {
+	// Collection models belong to editor/dialog widgets, not to QETApp.
+	// Their workers must finish before this object's cache and the factories
+	// are destroyed, even when no event loop (and no aboutToQuit) was run.
+	for (QWidget *window : QApplication::topLevelWidgets())
+		for (auto *model : window->findChildren<ElementsCollectionModel *>())
+			model->cancelLoading();
+
 	QET::saveCustomColors();
 	m_elements_recent_files->save();
 	m_projects_recent_files->save();

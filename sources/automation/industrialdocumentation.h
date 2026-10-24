@@ -10,11 +10,13 @@
 #include <QSaveFile>
 #include <QTextStream>
 #include <QTextDocument>
+#include <QTextBoundaryFinder>
 #include <QStringConverter>
 #include <QMap>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <memory>
+#include <cmath>
 
 namespace IndustrialDocumentation {
 struct Table { QString title; QStringList headings; QList<QStringList> rows; QList<int> weights; };
@@ -195,6 +197,46 @@ inline void border(Diagram*d,const QRectF&r) {
     auto *shape=new QetShapeItem(r.topLeft(),r.bottomRight(),QetShapeItem::Rectangle);
     shape->setPen(QPen(Qt::black,.6));d->addItem(shape);
 }
+inline int nativeRowHeight(const QStringList &values,const QList<int> &ws) {
+    int height=35;
+    for(int i=0;i<ws.size();++i) {
+        QTextDocument doc;doc.setDefaultFont(QFont("Arial",8));
+        doc.setPlainText(values.value(i));doc.setTextWidth(std::max(1,ws[i]-6));
+        height=std::max(height,int(std::ceil(doc.size().height()))+6);
+    }
+    return height;
+}
+// Split oversized user text across repeated-header pages without dropping
+// characters or cutting a Unicode grapheme (including surrogate pairs).
+inline QList<QStringList> splitNativeRow(QStringList remaining,const QList<int> &ws,
+                                       int maximumHeight=615) {
+    while(remaining.size()<ws.size())remaining<<QString();
+    QList<QStringList> result;
+    while(nativeRowHeight(remaining,ws)>maximumHeight) {
+        QStringList chunk;
+        for(int col=0;col<ws.size();++col) {
+            const QString value=remaining[col];
+            QList<int> boundaries{0};
+            QTextBoundaryFinder finder(QTextBoundaryFinder::Grapheme,value);
+            for(int end=finder.toNextBoundary();end>=0;end=finder.toNextBoundary())
+                boundaries<<end;
+            int low=0,high=boundaries.size()-1;
+            while(low<high) {
+                const int mid=(low+high+1)/2;
+                if(nativeRowHeight({value.left(boundaries[mid])},{ws[col]})<=maximumHeight)
+                    low=mid;
+                else high=mid-1;
+            }
+            const int cut=boundaries[low];
+            chunk<<value.left(cut);remaining[col]=value.mid(cut);
+        }
+        // Valid page/column dimensions always fit at least one grapheme.
+        // Refuse invalid dimensions rather than looping or dropping text.
+        if(std::all_of(chunk.cbegin(),chunk.cend(),[](const QString &s){return s.isEmpty();}))return {};
+        result<<chunk;
+    }
+    result<<remaining;return result;
+}
 inline int createSheets(QETProject *project) {
     if(!project || project->isReadOnly() || !project->undoStack())return 0;
     const auto inv=SymbolLegend::inventory(project);const auto ts=tables(project);
@@ -233,13 +275,11 @@ inline int createSheets(QETProject *project) {
         };newPage();
         const auto rows=t.rows.isEmpty()?QList<QStringList>{{QStringLiteral("Nenhum registro aplicável.")}}:t.rows;
         for(const auto&r:rows) {
-            int h=35;QFont font("Arial",8);
-            for(int i=0;i<ws.size();++i) {
-                QTextDocument doc;doc.setDefaultFont(font);doc.setPlainText(r.value(i));doc.setTextWidth(ws[i]-6);
-                h=std::max(h,int(doc.size().height())+6);
+            for(const auto &part:splitNativeRow(r,ws)) {
+                const int h=nativeRowHeight(part,ws);
+                if(y+h>715)newPage();
+                int x=30;for(int i=0;i<ws.size();++i){QRectF cell(x,y,ws[i],h);border(d,cell);text(d,part.value(i),cell);x+=ws[i];}y+=h;
             }
-            if(y+h>715)newPage();
-            int x=30;for(int i=0;i<ws.size();++i){QRectF cell(x,y,ws[i],h);border(d,cell);text(d,r.value(i),cell);x+=ws[i];}y+=h;
         }
     }
     project->undoStack()->endMacro();return count;

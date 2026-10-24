@@ -698,7 +698,15 @@ inline void run(QWidget *parent, QETProject *project) {
             return;
         chosenPotentials=requestedGroups;
         // Never reuse another load's values after changing the selected circuit.
-        voltage->setValue(0.);current->setValue(0.);power->setValue(0.);length->setValue(0.);
+        for(auto *field:{voltage,current,power,pf,length,protection,trip,fault,clearing,k}) {
+            QSignalBlocker block(field);field->setValue(0.);
+        }
+        {QSignalBlocker block(temperature);temperature->setValue(1.);}
+        {QSignalBlocker block(grouping);grouping->setValue(1.);}
+        {QSignalBlocker block(drop);drop->setValue(4.);}
+        {QSignalBlocker block(supply);supply->setCurrentIndex(1);}
+        {QSignalBlocker block(pair);pair->setCurrentIndex(0);}
+        overwrite->setChecked(false);
         profileConfirmed->setChecked(false);loadDeclared();
         if (!chosenPotentials.isEmpty()) scope->setCurrentIndex(0);
         else if (!selectedWires) scope->setCurrentIndex(1);
