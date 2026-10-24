@@ -121,7 +121,20 @@ jobs:
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE/build"
-          ctest --output-on-failure --timeout 300 --no-tests=error
+          set +e
+          ctest --output-on-failure --timeout 300 --no-tests=error > ctest-windows.log 2>&1
+          qet_ctest_status=$?
+          set -e
+          cat ctest-windows.log
+          if test "$qet_ctest_status" -ne 0 && test -f Testing/Temporary/LastTestsFailed.log; then
+            while IFS=: read -r qet_test_number qet_test_name; do
+              qet_test_name="${qet_test_name%$'\r'}"
+              if [[ "$qet_test_name" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+                echo "::error title=CTest Windows::Teste reprovado: $qet_test_name"
+              fi
+            done < Testing/Temporary/LastTestsFailed.log
+          fi
+          exit "$qet_ctest_status"
 
       - name: Gerar pasta portatil Windows com dependencias
         id: pacote

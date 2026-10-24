@@ -3,29 +3,51 @@
 import ctypes,json,os,pathlib,shutil,subprocess,sys,tempfile,time
 from ctypes import wintypes
 
-def visible_editor_windows(pid):
-    """Find the packaged process's resizable top-level editor, not its splash."""
+def visible_process_windows(pid):
     user32=ctypes.windll.user32
     callback_type=ctypes.WINFUNCTYPE(wintypes.BOOL,wintypes.HWND,wintypes.LPARAM)
     user32.EnumWindows.argtypes=[callback_type,wintypes.LPARAM]
     user32.GetWindowThreadProcessId.argtypes=[wintypes.HWND,ctypes.POINTER(wintypes.DWORD)]
     user32.IsWindowVisible.argtypes=[wintypes.HWND]
-    user32.GetWindowLongW.argtypes=[wintypes.HWND,ctypes.c_int]
-    user32.GetClientRect.argtypes=[wintypes.HWND,ctypes.POINTER(wintypes.RECT)]
     windows=[]
     @callback_type
     def visit(window,_):
         owner=wintypes.DWORD()
         user32.GetWindowThreadProcessId(window,ctypes.byref(owner))
-        if owner.value!=pid or not user32.IsWindowVisible(window):return True
-        style=user32.GetWindowLongW(window,-16)  # GWL_STYLE
-        rect=wintypes.RECT()
-        user32.GetClientRect(window,ctypes.byref(rect))
-        if style & 0x00040000 and style & 0x00080000 and rect.right>=400 and rect.bottom>=250:
-            windows.append(window)  # WS_THICKFRAME and WS_SYSMENU exclude a splash.
+        if owner.value==pid and user32.IsWindowVisible(window):windows.append(window)
         return True
     if not user32.EnumWindows(visit,0):raise ctypes.WinError()
     return windows
+
+def visible_editor_windows(pid):
+    """Find enabled, resizable editors; a visible parent can still be modal-blocked."""
+    user32=ctypes.windll.user32
+    user32.IsWindowEnabled.argtypes=[wintypes.HWND]
+    user32.GetWindowLongW.argtypes=[wintypes.HWND,ctypes.c_int]
+    user32.GetClientRect.argtypes=[wintypes.HWND,ctypes.POINTER(wintypes.RECT)]
+    editors=[]
+    for window in visible_process_windows(pid):
+        style=user32.GetWindowLongW(window,-16)
+        rect=wintypes.RECT();user32.GetClientRect(window,ctypes.byref(rect))
+        if (user32.IsWindowEnabled(window) and style & 0x00040000 and style & 0x00080000
+                and rect.right>=400 and rect.bottom>=250):editors.append(window)
+    return editors
+
+def answer_backup_prompt(pid):
+    # The test's isolated INI explicitly selects English. Never dismiss unknown
+    # modal windows: a missing-symbol or file error must still fail the smoke test.
+    user32=ctypes.windll.user32
+    user32.GetWindowTextW.argtypes=[wintypes.HWND,wintypes.LPWSTR,ctypes.c_int]
+    user32.PostMessageW.argtypes=[wintypes.HWND,wintypes.UINT,wintypes.WPARAM,wintypes.LPARAM]
+    for window in visible_process_windows(pid):
+        title=ctypes.create_unicode_buffer(256)
+        user32.GetWindowTextW(window,title,len(title))
+        if title.value=='Create a backup copy?':
+            # The project is already a disposable copy. Escape chooses no extra
+            # backup, without modifying the packaged example or hiding errors.
+            if not user32.PostMessageW(window,0x0100,0x1B,1):raise ctypes.WinError()
+            return True
+    return False
 
 def verify_gui(command,work,environment):
     # A file cannot fill up like a pipe while Qt loads a large project.
@@ -33,12 +55,18 @@ def verify_gui(command,work,environment):
         process=subprocess.Popen(command,cwd=work,env=environment,stdout=log,stderr=subprocess.STDOUT)
         try:
             deadline=time.monotonic()+90
-            windows=[]
+            windows=[];backup_answered=False;ready_since=None
             while time.monotonic()<deadline and process.poll() is None:
+                backup_answered=answer_backup_prompt(process.pid) or backup_answered
                 windows=visible_editor_windows(process.pid)
-                if windows:break
+                if windows and backup_answered:
+                    if ready_since is None:ready_since=time.monotonic()
+                    if time.monotonic()-ready_since>=1:break
+                else:ready_since=None
                 time.sleep(.2)
-            if not windows:raise RuntimeError('Packaged Windows GUI did not show an editor window')
+            if not backup_answered:raise RuntimeError('Expected project backup confirmation was not handled')
+            if not windows or ready_since is None or time.monotonic()-ready_since<1:
+                raise RuntimeError('Packaged Windows GUI did not show a ready editor window')
             time.sleep(1)
             if process.poll() is not None:raise RuntimeError('Packaged Windows GUI exited immediately')
             post=ctypes.windll.user32.PostMessageW
@@ -68,6 +96,10 @@ fixture=root/'documentacao/QET-Industrial-Demonstracao.qet'
 if not fixture.exists():fixture=root/'examples/industrial.qet'
 if not fixture.exists():raise SystemExit('No actual QET project available for runtime test')
 with tempfile.TemporaryDirectory(prefix='qet portable space ') as work:
+    settings=pathlib.Path(work)/'settings'/'QElectroTech'
+    settings.mkdir(parents=True)
+    (settings/'QElectroTech.ini').write_text('[General]\nlang=en\n',encoding='utf-8')
+    env['QET_SETTINGS_DIR']=str(settings.parent)
     output=pathlib.Path(work)/'opened-project.json'
     command=[str(exe),'--info',str(fixture),str(output),'--common-elements-dir='+str(root/'elements'),
         '--common-tbt-dir='+str(root/'titleblocks'),'--lang-dir='+str(root/'lang'),'--config-dir='+work]
@@ -86,9 +118,22 @@ with tempfile.TemporaryDirectory(prefix='qet portable space ') as work:
     gui_fixture=root/'examples/741.qet'
     if not gui_fixture.exists():gui_fixture=fixture
     shutil.copyfile(gui_fixture,gui_project)
-    verify_gui([str(exe),str(gui_project),'--common-elements-dir='+str(root/'elements'),
-        '--common-tbt-dir='+str(root/'titleblocks'),'--lang-dir='+str(root/'lang'),
-        '--config-dir='+work,'--data-dir='+work],work,env)
+    try:
+        verify_gui([str(exe),str(gui_project),'--common-elements-dir='+str(root/'elements'),
+            '--common-tbt-dir='+str(root/'titleblocks'),'--lang-dir='+str(root/'lang'),
+            '--config-dir='+work,'--data-dir='+work],work,env)
+    except Exception as error:
+        # Publish only controlled stage names, never arbitrary process output.
+        stage='Falha na verificacao da janela nativa'
+        if isinstance(error,subprocess.TimeoutExpired):stage='A janela nao encerrou no prazo'
+        elif isinstance(error,OSError):stage='Erro Win32 ao acessar a janela'
+        else:
+            for known in ('Expected project backup confirmation was not handled',
+                          'Packaged Windows GUI did not show a ready editor window',
+                          'Packaged Windows GUI exited immediately','Packaged GUI crashed on close'):
+                if str(error).startswith(known):stage=known;break
+        print('::error title=Windows portable GUI::'+stage,flush=True)
+        raise
 (root/'validation').mkdir(exist_ok=True)
 (root/'validation/portable-runtime.txt').write_text('PASS: packaged Windows executable opened an actual .qet with Qt windows platform and isolated PATH.\nPASS: native Windows editor window became visible and exited normally after WM_CLOSE.\nManual acceptance of the complete industrial workflow is not claimed by these checks.\n',encoding='utf-8')
 (root/'validation/build-info.json').write_text(json.dumps({
@@ -99,5 +144,6 @@ with tempfile.TemporaryDirectory(prefix='qet portable space ') as work:
     'ctest':os.environ.get('QET_CTEST','not-reported'),
     'packaged_windows_project_open':'passed',
     'packaged_windows_gui_open_and_close':'passed',
+    'temporary_copy_backup_prompt_handled':'passed',
     'manual_acceptance':'not-run'},indent=2),encoding='utf-8')
 print('PASS packaged Windows runtime, Qt windows plugin, actual QET project, isolated PATH')
