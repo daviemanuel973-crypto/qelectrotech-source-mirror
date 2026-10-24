@@ -7,6 +7,7 @@
 #include "../qetgraphicsitem/qetshapeitem.h"
 #include "../factory/elementfactory.h"
 #include "../undocommand/adddiagramcommand.h"
+#include "../undocommand/removediagramcommand.h"
 #include <QSaveFile>
 #include <QTextStream>
 #include <QTextDocument>
@@ -19,18 +20,31 @@
 #include <cmath>
 
 namespace IndustrialDocumentation {
+enum class Section { All, Materials, Symbols };
 struct Table { QString title; QStringList headings; QList<QStringList> rows; QList<int> weights; };
 inline bool generated(Diagram *d) {
     return d && d->border_and_titleblock.additionalFields()
         .value(QStringLiteral("qet_generated_documentation")).toBool();
 }
+inline Table materialTable(const SymbolLegend::Inventory &inv) {
+    Table materials{QStringLiteral("RELAÇÃO DE MATERIAIS"),
+        {"REFERÊNCIAS","QTD.","CÓDIGO","DESCRIÇÃO","FABRICANTE","MODELO","PENDÊNCIAS"},
+        {},{16,5,13,24,13,12,17}};
+    for(const auto &r:inv.materials) {
+        QStringList pending;
+        if(r.manufacturer.isEmpty())pending << QStringLiteral("fabricante");
+        if(r.partNumber.isEmpty())pending << QStringLiteral("código comercial");
+        if(!r.quantityKnown)pending << QStringLiteral("quantidade numérica / unidade");
+        materials.rows << QStringList{r.references.join(", "),SymbolLegend::materialQuantity(r),
+            r.partNumber,r.description,r.manufacturer,r.model,
+            pending.isEmpty()?QString():QStringLiteral("Preencher: ")+pending.join(", ")};
+    }
+    return materials;
+}
 inline QList<Table> tables(QETProject *project) {
     const auto inv=SymbolLegend::inventory(project);
     const auto trace=WireTrace::scan(project);
-    Table materials{QStringLiteral("RELAÇÃO DE MATERIAIS"),
-        {"REFERÊNCIAS","QTD.","CÓDIGO","DESCRIÇÃO","FABRICANTE","MODELO"},{},{17,5,15,30,16,17}};
-    for(const auto &r:inv.materials)materials.rows << QStringList{
-        r.references.join(", "),QString::number(r.quantity),r.partNumber,r.description,r.manufacturer,r.model};
+    const auto materials=materialTable(inv);
     Table devices{QStringLiteral("FUNÇÃO DOS DISPOSITIVOS"),
         {"REFERÊNCIA","COMENTÁRIO","FUNÇÃO","DESCRIÇÃO TEXTUAL","FABRICANTE"},{},{12,20,22,31,15}};
     Table terminals{QStringLiteral("LISTA DE BORNES"),
@@ -237,14 +251,41 @@ inline QList<QStringList> splitNativeRow(QStringList remaining,const QList<int> 
     }
     result<<remaining;return result;
 }
-inline int createSheets(QETProject *project) {
+inline QString sheetKind(Diagram *d) {
+    if(!generated(d))return {};
+    const auto props=d->border_and_titleblock.exportTitleBlock();
+    const QString kind=props.context.value("qet_documentation_kind").toString();
+    if(!kind.isEmpty())return kind;
+    // Migrate only pages already marked by our older generator. A manual
+    // sheet with an identical title must never be mistaken for generated data.
+    if(props.title==QStringLiteral("SIMBOLOGIA"))return QStringLiteral("symbols");
+    if(props.title==QStringLiteral("RELAÇÃO DE MATERIAIS"))return QStringLiteral("materials");
+    return QStringLiteral("other");
+}
+inline int createSheets(QETProject *project,Section section=Section::All) {
     if(!project || project->isReadOnly() || !project->undoStack())return 0;
-    const auto inv=SymbolLegend::inventory(project);const auto ts=tables(project);
-    project->undoStack()->beginMacro(QObject::tr("Gerar folhas de documentação industrial"));
+    const QString selectedKind=section==Section::Materials?QStringLiteral("materials"):
+        section==Section::Symbols?QStringLiteral("symbols"):QString();
+    const QString command=section==Section::Materials?QObject::tr("Gerar/atualizar lista de materiais"):
+        section==Section::Symbols?QObject::tr("Gerar/atualizar simbologia"):
+                                 QObject::tr("Gerar/atualizar documentação industrial");
+    project->undoStack()->beginMacro(command);
+    // Remove through native commands so refresh, including manual edits on
+    // generated pages, is recoverable in one undo. Other sections are retained.
+    const auto oldPages=project->diagrams();
+    for(Diagram *d:oldPages)
+        if(generated(d) && (section==Section::All || sheetKind(d)==selectedKind))
+            project->undoStack()->push(new RemoveDiagramCommand(project,d));
+    // Scan after detaching old documentation, so page references reflect the
+    // actual source folios even when generated sheets were moved between them.
+    const auto inv=SymbolLegend::inventory(project);
+    const auto ts=section==Section::Symbols?QList<Table>{}:
+        section==Section::Materials?QList<Table>{materialTable(inv)}:tables(project);
     int count=0;
-    auto page=[&](const QString&title) {
+    auto page=[&](const QString&title,const QString&kind) {
         auto *d=project->addNewDiagram();auto props=d->border_and_titleblock.exportTitleBlock();
         props.title=title;props.context.addValue("qet_generated_documentation",true,false);
+        props.context.addValue("qet_documentation_kind",kind,false);
         d->border_and_titleblock.importTitleBlock(props);
         d->border_and_titleblock.setColumnsCount(18);d->border_and_titleblock.setColumnsWidth(60);
         d->border_and_titleblock.setDiagramHeight(760);
@@ -253,8 +294,9 @@ inline int createSheets(QETProject *project) {
         ++count;return d;
     };
     // Actual native vector symbols; document folios are excluded from topology/BOM.
-    for(int offset=0;offset<inv.symbols.size();offset+=21) {
-        Diagram*d=page("SIMBOLOGIA");
+    for(int offset=0;section!=Section::Materials && offset<std::max(1,int(inv.symbols.size()));offset+=21) {
+        Diagram*d=page("SIMBOLOGIA","symbols");
+        if(inv.symbols.isEmpty())text(d,QObject::tr("Nenhum símbolo no projeto."),QRectF(30,65,1040,35));
         for(int n=0;n<21 && offset+n<inv.symbols.size();++n) {
             const auto&r=inv.symbols.at(offset+n);const int col=n%3,row=n/3;
             const QRectF box(30+col*346,65+row*92,346,92);
@@ -270,7 +312,8 @@ inline int createSheets(QETProject *project) {
     for(const auto&t:ts) {
         const auto ws=widths(t,1040);Diagram*d=nullptr;int y=0;
         auto newPage=[&]() {
-            d=page(t.title);y=65;int x=30;
+            d=page(t.title,t.title==QStringLiteral("RELAÇÃO DE MATERIAIS")?
+                   QStringLiteral("materials"):QStringLiteral("other"));y=65;int x=30;
             for(int i=0;i<ws.size();++i){QRectF cell(x,y,ws[i],35);border(d,cell);text(d,t.headings[i],cell,true);x+=ws[i];}y+=35;
         };newPage();
         const auto rows=t.rows.isEmpty()?QList<QStringList>{{QStringLiteral("Nenhum registro aplicável.")}}:t.rows;
@@ -284,11 +327,15 @@ inline int createSheets(QETProject *project) {
     }
     project->undoStack()->endMacro();return count;
 }
-inline void generateSheets(QWidget *parent,QETProject *project) {
+inline int createMaterials(QETProject *project) { return createSheets(project,Section::Materials); }
+inline int createSymbols(QETProject *project) { return createSheets(project,Section::Symbols); }
+inline void generateSheets(QWidget *parent,QETProject *project,Section section=Section::All) {
     if(!project)return;
-    const int n=createSheets(project);
-    if(n)QMessageBox::information(parent,"Documentação",QStringLiteral("%1 folhas editáveis geradas. Use Exportar PDF do QET para exportá-las. Ctrl+Z desfaz a geração.").arg(n));
+    const int n=createSheets(project,section);
+    if(n)QMessageBox::information(parent,"Documentação",QStringLiteral("%1 folhas editáveis geradas/atualizadas com os dados atuais do projeto. As folhas automáticas desta seção são substituídas a cada execução. Use Exportar PDF do QET para exportá-las. Ctrl+Z restaura a versão anterior.").arg(n));
     else QMessageBox::warning(parent,"Documentação","Não foi possível gerar as folhas.");
 }
+inline void generateMaterials(QWidget *parent,QETProject *project) { generateSheets(parent,project,Section::Materials); }
+inline void generateSymbols(QWidget *parent,QETProject *project) { generateSheets(parent,project,Section::Symbols); }
 }
 #endif

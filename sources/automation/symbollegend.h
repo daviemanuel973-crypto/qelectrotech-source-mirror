@@ -34,6 +34,7 @@
 #include <QHeaderView>
 #include <QPicture>
 #include <QSignalBlocker>
+#include <cmath>
 #include <algorithm>
 
 namespace SymbolLegend {
@@ -42,7 +43,9 @@ struct Record {
     QString designator, abbreviation, kind, comment, function, description, manufacturer, partNumber;
     QString identity, model;
     QStringList references;
-    int quantity = 1;
+    double quantity = 1;
+    QString declaredQuantity;
+    bool quantityKnown = true;
 };
 struct Inventory {
     QList<Record> symbols;
@@ -72,6 +75,9 @@ inline QString firstValue(const DiagramContext &info,const QStringList &keys) {
         if(!s.isEmpty())return s;
     }
     return {};
+}
+inline QString materialQuantity(const Record &record) {
+    return record.quantityKnown?QString::number(record.quantity,'g',12):record.declaredQuantity;
 }
 inline QString abbreviation(const QString &label) {
     const auto match=QRegularExpression(QStringLiteral("^[^A-Za-zÀ-ÿ]*([A-Za-zÀ-ÿ]+)"))
@@ -112,8 +118,20 @@ inline Inventory inventory(QETProject *project) {
             entry.manufacturer=infoText(info,QStringLiteral("manufacturer"));
             entry.partNumber=firstValue(info,{QStringLiteral("manufacturer_reference"),
                                               QStringLiteral("machine_manufacturer_reference")});
-            entry.model=infoText(info,QStringLiteral("qet_documentation_model"));
-            entry.references << entry.designator;
+            entry.model=firstValue(info,{QStringLiteral("model"),QStringLiteral("qet_documentation_model")});
+            entry.declaredQuantity=infoText(info,QStringLiteral("quantity"));
+            if(!entry.declaredQuantity.isEmpty()) {
+                QString number=entry.declaredQuantity;
+                // Accept decimal comma, but leave unit-bearing expressions
+                // untouched and separate instead of guessing their value/unit.
+                if(QRegularExpression(QStringLiteral("^[0-9]+,[0-9]+$")).match(number).hasMatch())
+                    number.replace(',', '.');
+                entry.quantity=number.toDouble(&entry.quantityKnown);
+                entry.quantityKnown=entry.quantityKnown && std::isfinite(entry.quantity) && entry.quantity>=0;
+            }
+            entry.references << (entry.designator.isEmpty()?
+                QStringLiteral("Pág. %1 / %2").arg(folio->folioIndex()+1)
+                    .arg(element->uuid().toString(QUuid::WithoutBraces)):entry.designator);
             entry.identity=element->location().path();
             if(entry.identity.isEmpty())
                 entry.identity=element->uuid().toString();
@@ -130,22 +148,35 @@ inline Inventory inventory(QETProject *project) {
             bool linkedSlave=false;
             if(element->linkType() & Element::Slave)
                 for(Element *linked:element->linkedElements())
-                    if(linked && (linked->linkType() & Element::Master))linkedSlave=true;
-            if(linkedSlave || (element->linkType() & Element::AllReport))continue;
+                    if(linked && (linked->linkType() & Element::Master)) {
+                        const auto master=linked->elementInformations();
+                        const QString masterCode=firstValue(master,{"manufacturer_reference","machine_manufacturer_reference"});
+                        // A separately specified auxiliary block is orderable
+                        // hardware; a repeat view of its master is not.
+                        linkedSlave=linkedSlave || entry.partNumber.isEmpty() ||
+                            (entry.partNumber==masterCode && entry.manufacturer==infoText(master,"manufacturer") &&
+                             entry.model==firstValue(master,{"model","qet_documentation_model"}));
+                    }
+            const QString excluded=infoText(info,"exclude_from_bom").toCaseFolded();
+            if(!(element->linkType() & (Element::Simple|Element::Master|Element::Slave|Element::Terminale)) || linkedSlave ||
+               QStringList{"true","1","yes","on"}.contains(excluded))continue;
             // The linked coil/master is the physical product. Folio arrows
             // are references, not purchasable material occurrences.
             // With missing manufacturer/product code equivalence is unknown.
             // A graphical definition is never a stock keeping identifier.
-            const QString materialKey=entry.partNumber.isEmpty() || entry.manufacturer.isEmpty() ?
+            // Length prefixes avoid collisions if a code/model contains '|'.
+            auto keyed=[](const QString &value){return QString::number(value.size())+':'+value;};
+            const QString materialKey=entry.partNumber.isEmpty() || entry.manufacturer.isEmpty() || !entry.quantityKnown ?
                 QStringLiteral("instance:")+element->uuid().toString() :
-                entry.manufacturer.toCaseFolded()+QStringLiteral("|")+                entry.partNumber.toCaseFolded()+QStringLiteral("|")+entry.model.toCaseFolded();
+                QStringLiteral("part:")+keyed(entry.manufacturer.toCaseFolded())+
+                    keyed(entry.partNumber)+keyed(entry.model);
             auto mit=materialByRef.constFind(materialKey);
             if(mit==materialByRef.cend()) {
                 materialByRef.insert(materialKey,inv.materials.size());
                 inv.materials << entry;
             } else {
-                ++inv.materials[mit.value()].quantity;
-                inv.materials[mit.value()].references << entry.designator;
+                inv.materials[mit.value()].quantity+=entry.quantity;
+                inv.materials[mit.value()].references.append(entry.references);
             }
         }
     }
@@ -316,7 +347,7 @@ inline bool renderMaterials(QPainter &p,QPdfWriter &pdf,const Inventory &inv,
         auto draw=[&](const Record &item,bool headerRow) {
             int x=page.left();
             const QString vals[]={headerRow?QStringLiteral("REFERÊNCIA / COMPONENTE"):item.kind,
-                                  headerRow?QStringLiteral("QTD."):QString::number(item.quantity),
+                                  headerRow?QStringLiteral("QTD."):materialQuantity(item),
                                   headerRow?QStringLiteral("CÓDIGO"):item.partNumber,
                                   headerRow?QStringLiteral("DESCRIÇÃO"):item.kind,
                                   headerRow?QStringLiteral("FABRICANTE"):item.manufacturer};

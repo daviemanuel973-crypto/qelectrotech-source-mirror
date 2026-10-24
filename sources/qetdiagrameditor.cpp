@@ -1662,7 +1662,11 @@ void QETDiagramEditor::setUpMenu()
 	});
     connect(industrial->addAction(tr("Editar dados elétricos das cargas...")), &QAction::triggered,
         this,[this](){ElectricalData::edit(this,currentProject());});
-    connect(industrial->addAction(tr("Gerar documentação em folhas editáveis...")), &QAction::triggered,
+    connect(industrial->addAction(tr("Gerar/atualizar lista de materiais...")), &QAction::triggered,
+        this,[this](){IndustrialDocumentation::generateMaterials(this,currentProject());});
+    connect(industrial->addAction(tr("Gerar/atualizar simbologia...")), &QAction::triggered,
+        this,[this](){IndustrialDocumentation::generateSymbols(this,currentProject());});
+    connect(industrial->addAction(tr("Gerar/atualizar documentação completa em folhas editáveis...")), &QAction::triggered,
         this,[this](){IndustrialDocumentation::generateSheets(this,currentProject());});
     connect(industrial->addAction(tr("Exportar tabelas CSV...")), &QAction::triggered,
         this,[this](){IndustrialDocumentation::exportCsv(this,currentProject());});

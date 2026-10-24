@@ -40,6 +40,157 @@
 static void require(bool test, const char *name) {
     if (!test) throw std::runtime_error(name);
 }
+static void checkAutomaticLists(QETProject &project,const QString &outputDir) {
+    {
+        QETProject empty;
+        const int initial=empty.diagrams().size();
+        require(IndustrialDocumentation::createMaterials(&empty)==1 &&
+                IndustrialDocumentation::createSymbols(&empty)==1,
+                "empty project generates explicit empty lists without failure");
+        const int complete=IndustrialDocumentation::createSheets(&empty);
+        require(complete==11 && empty.diagrams().size()==initial+complete,
+                "complete generation replaces selective empty lists");
+        require(IndustrialDocumentation::createSheets(&empty)==complete &&
+                empty.diagrams().size()==initial+complete,"complete refresh does not accumulate copies");
+    }
+    const auto baseline=SymbolLegend::inventory(&project);
+    require(baseline.materials.size()>=2,"fixture has two physical devices for BOM grouping");
+    Element *first=baseline.materials.at(0).symbol,*second=baseline.materials.at(1).symbol;
+    const auto firstInfo=first->elementInformations(),secondInfo=second->elementInformations();
+    auto info=firstInfo;
+    info.addValue("manufacturer","QET BOM regression",false);
+    info.addValue("manufacturer_reference","BOM-TEST-42",false);
+    info.addValue("model","Model A",false);info.addValue("quantity","1",false);
+    info.addValue("exclude_from_bom","false",false);
+    first->setElementInformations(info);
+    info=secondInfo;
+    info.addValue("manufacturer","QET BOM regression",false);
+    info.addValue("manufacturer_reference","BOM-TEST-42",false);
+    info.addValue("model","Model A",false);info.addValue("quantity","1",false);
+    info.addValue("exclude_from_bom","false",false);
+    second->setElementInformations(info);
+    auto grouped=SymbolLegend::inventory(&project);
+    int testRows=0;
+    for(const auto &r:grouped.materials)if(r.manufacturer=="QET BOM regression") {
+        ++testRows;require(r.quantity==2 && r.references.size()==2,"BOM counts matching commercial parts once per device");
+    }
+    require(testRows==1,"same manufacturer, code and model produce one material row");
+    info.addValue("model","Model B",false);second->setElementInformations(info);
+    grouped=SymbolLegend::inventory(&project);testRows=0;
+    for(const auto &r:grouped.materials)if(r.manufacturer=="QET BOM regression") {
+        ++testRows;require(r.quantity==1,"different models must not merge in BOM");
+    }
+    require(testRows==2,"different models produce separate material rows");
+    info.addValue("manufacturer_reference","",false);second->setElementInformations(info);
+    bool pending=false;
+    for(const auto &r:IndustrialDocumentation::materialTable(SymbolLegend::inventory(&project)).rows)
+        if(r.at(4)=="QET BOM regression" && r.at(2).isEmpty())pending=r.at(6).contains("código comercial");
+    require(pending,"missing product code is explicitly pending in BOM output");
+    info.addValue("manufacturer_reference","BOM-TEST-42",false);
+    info.addValue("model","Model A",false);info.addValue("quantity","2,5",false);
+    second->setElementInformations(info);
+    auto firstQuantity=first->elementInformations();firstQuantity.addValue("quantity","3",false);
+    first->setElementInformations(firstQuantity);
+    grouped=SymbolLegend::inventory(&project);testRows=0;
+    for(const auto &r:grouped.materials)if(r.manufacturer=="QET BOM regression") {
+        ++testRows;require(r.quantityKnown && std::abs(r.quantity-5.5)<1e-9,"BOM sums declared native quantities, including decimal comma");
+    }
+    require(testRows==1,"declared quantities aggregate by commercial identity");
+    info.addValue("exclude_from_bom","yes",false);second->setElementInformations(info);
+    grouped=SymbolLegend::inventory(&project);testRows=0;
+    for(const auto &r:grouped.materials)if(r.manufacturer=="QET BOM regression") {
+        ++testRows;require(r.quantity==3,"excluded component is absent from total quantity");
+    }
+    require(testRows==1,"native BOM exclusion is honored");
+    info.addValue("exclude_from_bom","false",false);info.addValue("quantity","2 m",false);
+    second->setElementInformations(info);grouped=SymbolLegend::inventory(&project);bool rawPreserved=false;
+    for(const auto &r:grouped.materials)if(r.symbol==second)
+        rawPreserved=!r.quantityKnown && SymbolLegend::materialQuantity(r)=="2 m";
+    require(rawPreserved,"unit-bearing quantity is preserved without inventing conversion or aggregation");
+    first->setElementInformations(firstInfo);second->setElementInformations(secondInfo);
+    Element *slave=nullptr,*master=nullptr;
+    for(const auto &r:baseline.devices)if(!slave && (r.symbol->linkType() & Element::Slave))
+        for(Element *linked:r.symbol->linkedElements())if(linked && (linked->linkType() & Element::Master)) {
+            slave=r.symbol;master=linked;break;
+        }
+    require(slave && master,"fixture contains a linked contact for auxiliary part policy");
+    const auto slaveInfo=slave->elementInformations();info=slaveInfo;
+    info.addValue("manufacturer","QET auxiliary regression",false);
+    info.addValue("manufacturer_reference","AUX-BLOCK-TEST",false);
+    info.addValue("quantity","1",false);info.addValue("exclude_from_bom","false",false);
+    slave->setElementInformations(info);bool accessoryListed=false;
+    for(const auto &r:SymbolLegend::inventory(&project).materials)if(r.symbol==slave)accessoryListed=true;
+    require(accessoryListed,"linked contact with its own order code remains a purchasable accessory");
+    info.addValue("manufacturer_reference","",false);slave->setElementInformations(info);
+    bool repeatedViewListed=false;
+    for(const auto &r:SymbolLegend::inventory(&project).materials)if(r.symbol==slave)repeatedViewListed=true;
+    require(!repeatedViewListed,"linked contact without own order data does not duplicate its master");
+    slave->setElementInformations(slaveInfo);
+
+    const auto originalPages=project.diagrams();
+    const int undoIndex=project.undoStack()->index();
+    // A title alone is never permission to replace a manually authored folio.
+    Diagram *manual=project.addNewDiagram();auto props=manual->border_and_titleblock.exportTitleBlock();
+    props.title="RELAÇÃO DE MATERIAIS";manual->border_and_titleblock.importTitleBlock(props);
+    IndustrialDocumentation::text(manual,"PRESERVAR FOLHA MANUAL",QRectF(30,30,400,60));
+    const int materialPages=IndustrialDocumentation::createMaterials(&project);
+    require(materialPages>0 && project.diagrams().size()==originalPages.size()+1+materialPages,
+            "dedicated materials function creates only material folios");
+    QList<Diagram*> previousMaterials;
+    for(Diagram *d:project.diagrams())if(IndustrialDocumentation::generated(d)) {
+        require(IndustrialDocumentation::sheetKind(d)=="materials","BOM function does not generate unrelated tables");
+        previousMaterials<<d;
+    }
+    IndustrialDocumentation::text(previousMaterials.first(),"EDIT BEFORE REFRESH",QRectF(30,720,400,35));
+    auto legacy=previousMaterials.first()->border_and_titleblock.exportTitleBlock();
+    legacy.context.remove("qet_documentation_kind");
+    previousMaterials.first()->border_and_titleblock.importTitleBlock(legacy);
+    const int symbolPages=IndustrialDocumentation::createSymbols(&project);
+    require(symbolPages==(baseline.symbols.size()+20)/21,"dedicated symbol function paginates actual definitions");
+    QList<Diagram*> previousSymbols;
+    for(Diagram *d:project.diagrams())if(IndustrialDocumentation::sheetKind(d)=="symbols")previousSymbols<<d;
+    for(Diagram *d:previousMaterials)require(project.diagrams().contains(d),"symbol generation retains material sheets");
+    info=firstInfo;info.addValue("manufacturer_reference","UPDATED-CODE-123",false);first->setElementInformations(info);
+    const int refreshedMaterialPages=IndustrialDocumentation::createMaterials(&project);
+    require(refreshedMaterialPages>0,"material refresh generates current data");
+    require(project.diagrams().size()==originalPages.size()+1+refreshedMaterialPages+symbolPages,
+            "refresh replaces previous BOM instead of accumulating duplicates");
+    bool updated=false;
+    for(Diagram *d:project.diagrams())if(IndustrialDocumentation::sheetKind(d)=="materials")
+        for(auto *item:d->items())if(auto *t=qgraphicsitem_cast<IndependentTextItem*>(item))
+            if(t->toPlainText().contains("UPDATED-CODE-123"))updated=true;
+    require(updated,"refresh reads changed real component data into native table");
+    for(Diagram *d:previousSymbols)require(project.diagrams().contains(d),"material refresh preserves symbol sheets");
+    require(project.diagrams().contains(manual),"manual sheet with generated title survives refresh");
+    project.undoStack()->undo();
+    for(Diagram *d:previousMaterials)require(project.diagrams().contains(d),"single undo restores previous material pages");
+    bool editRestored=false;
+    for(auto *item:previousMaterials.first()->items())if(auto *t=qgraphicsitem_cast<IndependentTextItem*>(item))
+        if(t->toPlainText()=="EDIT BEFORE REFRESH")editRestored=true;
+    require(editRestored,"refresh undo recovers manual edits on old automatic sheets");
+    project.undoStack()->redo();
+    require(SymbolLegend::inventory(&project).elementsScanned==baseline.elementsScanned,
+            "automatic documents never inflate source component quantities");
+    const QString previousPath=project.filePath();
+    const QString path=QDir(outputDir).filePath("QET-Listas-Automaticas.qet");
+    project.setFilePath(path);require(project.write().isOk(),"selective lists save as native QET");
+    project.setFilePath(previousPath);
+    {
+        QETProject saved(path);require(saved.state()==QETProject::Ok,"selective lists reopen");
+        QList<Diagram*> savedMaterials;
+        for(Diagram *d:saved.diagrams())if(IndustrialDocumentation::sheetKind(d)=="materials")savedMaterials<<d;
+        require(savedMaterials.size()==refreshedMaterialPages,"material ownership marker survives XML");
+        require(IndustrialDocumentation::createSymbols(&saved)==symbolPages &&
+                saved.diagrams().size()==originalPages.size()+1+refreshedMaterialPages+symbolPages,
+                "symbol refresh after reopen does not duplicate pages");
+        for(Diagram *d:savedMaterials)require(saved.diagrams().contains(d),"persisted sections refresh independently");
+    }
+    while(project.undoStack()->index()>undoIndex)project.undoStack()->undo();
+    require(project.diagrams()==originalPages,"undo restores exact original folio order");
+    first->setElementInformations(firstInfo);
+    std::printf("PASS QET automatic lists: grouped BOM, native quantities/exclusions, auxiliary parts, pending data, independent refresh, legacy/manual/empty sheets, undo/redo, save/reopen\n");
+    std::fflush(stdout);
+}
 int main(int argc, char **argv) {
     if (argc < 4) return 80;
     QApplication app(argc, argv);
@@ -740,6 +891,7 @@ int main(int argc, char **argv) {
                 "terminal table keeps actual drawing rotation and label");
         reopened.undoStack()->undo();reopened.undoStack()->redo();
         const QUuid documentedTerminalUuid=uiTerminal->uuid();
+        checkAutomaticLists(reopened,QString::fromLocal8Bit(argv[3]));
         const int originalFolios=reopened.diagrams().size();
         const int originalWireCount=WireTrace::scan(&reopened).wires;
         const int sheets=IndustrialDocumentation::createSheets(&reopened);

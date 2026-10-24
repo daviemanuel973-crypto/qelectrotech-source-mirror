@@ -35,11 +35,21 @@ A seção é gravada somente nos potenciais escolhidos. Propriedades existentes 
 
 **Gerar simbologia gráfica e tabelas (PDF)** exporta simbologia vetorial real, materiais, funções, bornes, condutores com origem/destino, bitolas, potenciais/circuitos, referências entre folhas, dimensionamento, propriedades ausentes e inconsistências. **Exportar tabelas CSV** produz os dados tabulares.
 
-**Gerar documentação em folhas editáveis** acrescenta folhas nativas ao projeto com textos e formas editáveis. A legenda usa gravações vetoriais do próprio símbolo em formas gráficas, sem criar componentes elétricos nem novas unidades de material. A geração pode ser desfeita/refeita em um único lote. As folhas são uma fotografia dos dados no momento da geração; depois de editar o projeto, regenere as folhas. Não são tabelas com atualização automática contínua.
+**Gerar/atualizar lista de materiais** percorre todas as folhas do projeto, reúne os dados comerciais, soma as quantidades e cria somente as folhas da relação de materiais. Ao executar novamente, substitui as folhas automáticas dessa lista pelos dados atuais, sem acrescentar cópias. Folhas manuais são preservadas, mesmo quando têm o mesmo título.
+
+**Gerar/atualizar simbologia** cria somente a legenda, com desenhos vetoriais dos símbolos realmente usados, letras de identificação e descrições. Símbolos repetidos que usam a mesma definição aparecem uma vez. Atualizar a simbologia preserva a lista de materiais; atualizar os materiais preserva a simbologia.
+
+**Gerar/atualizar documentação completa em folhas editáveis** atualiza todas as seções documentais geradas. A legenda usa gravações vetoriais do próprio símbolo em formas gráficas, sem criar componentes elétricos nem novas unidades de material. Cada geração/atualização pode ser desfeita/refeita em um único lote. Ctrl+Z também recupera edições manuais feitas nas folhas automáticas anteriores. Essas folhas são substituídas na próxima geração; mantenha conteúdo próprio em folhas manuais.
+
+As listas são uma fotografia dos dados no momento da execução: depois de alterar o projeto, execute novamente o comando correspondente. Não há atualização contínua em segundo plano. Use a exportação PDF do QET para imprimir/exportar as folhas desejadas. **Exportar tabelas CSV** inclui a relação de materiais com as mesmas quantidades e pendências.
 
 Descrições extensas continuam em novas linhas/folhas com cabeçalhos repetidos, preservando o texto, inclusive caracteres Unicode, dentro das margens. As tabelas nativas antigas do projeto industrial de exemplo podem emitir avisos próprios de capacidade; isso é separado das novas folhas documentais paginadas e não foi silenciado.
 
-Produtos só são agrupados quando fabricante, código e modelo permitem identificar equivalência. Ocorrências sem fabricante/código permanecem separadas. Contatos escravos vinculados a um mestre não viram produtos físicos adicionais. Setas de referência entre folhas não entram como unidades de material. Dados comerciais ausentes permanecem pendentes.
+Produtos só são agrupados quando fabricante, código e modelo permitem identificar equivalência. O campo nativo **model** é usado; o antigo campo documental é aceito quando ele está vazio. Códigos/modelos diferentes, inclusive em maiúsculas/minúsculas, permanecem separados. Ocorrências sem fabricante/código permanecem separadas e recebem pendências explícitas. Sem identificação, a referência da ocorrência informa página e UUID.
+
+A quantidade nativa **quantity** é respeitada: valores numéricos são somados, com vírgula ou ponto decimal; quando o campo está vazio, conta-se uma unidade por ocorrência. Expressões com unidades ou valores não interpretáveis permanecem textuais, em linhas separadas, com pendência para revisão. O campo **exclude_from_bom** é respeitado (`true`, `1`, `yes`, `on`). Contatos escravos vinculados sem código próprio, ou com o mesmo código/fabricante do mestre, não duplicam o produto; blocos auxiliares com referência comercial própria entram separadamente. Setas de referência entre folhas não entram como unidades de material.
+
+A lista representa os componentes cadastrados no esquema. Acessórios não desenhados/não cadastrados, trilhos, canaletas, parafusos e comprimentos físicos dos cabos não são deduzidos do desenho. Não há consulta automática a catálogos ou preenchimento de fabricante/código por adivinhação.
 
 O projeto original continua abrindo no formato `.qet`. Formas documentais com o campo adicional `qet_symbol_vector` precisam desta versão para exibir o pictograma; versões anteriores do QET podem mostrar apenas o contorno da forma. PDF preserva a representação vetorial.
 
