@@ -53,6 +53,7 @@ void RadialSizingTest::feederAndBranches() {
     QVERIFY(get(r,"F-L").section>get(r,"A-L").section);
     QCOMPARE(get(r,"F-N").current,20.);QCOMPARE(get(r,"F-PE").current,0.);
     QCOMPARE(get(r,"F-PE").section,get(r,"F-L").section);
+    QCOMPARE(get(r,"A-PE").protection,QString("Q1"));QCOMPARE(get(r,"B-PE").protection,QString("Q2"));
     QCOMPARE(get(r,"F-L").loads.size(),2);QCOMPARE(get(r,"A-L").loads,QStringList{"H1"});
     QCOMPARE(r.protections["Q0"].nominal,20.);QCOMPARE(r.protections["Q1"].nominal,10.);
     QCOMPARE(r.protections["Q2"].nominal,13.);
@@ -67,6 +68,7 @@ void RadialSizingTest::missingAndAmbiguous() {
     n=example();n.loads[0].harmonic3=-1;QVERIFY(!calculate(n).calculated);
     n=example();n.edges<<wire("parallel",0,3,"parallel");QVERIFY(!calculate(n).calculated);
     n=example();n.edges<<wire("short-N-PE",1,2,"invalid");QVERIFY(!calculate(n).calculated);
+    n=example();n.edges[2].kind=EdgeKind::Device;QVERIFY(!calculate(n).calculated);
     n=example();n.loads[0].voltage=24;QVERIFY(!calculate(n).calculated);
     n=example();n.loads[0].pe=-1;QVERIFY(!calculate(n).calculated);
     n=example();n.edges[6].cable="A";QVERIFY(!calculate(n).calculated);
@@ -116,6 +118,7 @@ void RadialSizingTest::cumulativeDrop() {
 }
 void RadialSizingTest::protectionAndFault() {
     auto n=example();n.protections["Q0"].fixedIn=10;QVERIFY(!calculate(n).calculated);
+    n=example();n.protections["Q1"].i2Multiple=1.3;QVERIFY(!calculate(n).calculated);
     n=example();n.protections["Q1"].breakingA=100;QVERIFY(!calculate(n).ready);
     n=example();n.selectivity.clear();auto r=calculate(n);QVERIFY(r.calculated && !r.ready);
     n=example();n.sourceFaultMax=6000;for(auto &p:n.selectivity)p.limitA=6000;r=calculate(n);

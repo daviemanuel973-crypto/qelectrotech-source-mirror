@@ -195,6 +195,7 @@ inline Analysis analyze(QETProject *project,const QJsonObject &data,bool overwri
                 a.result.errors<<"Contatos mutuamente exclusivos confirmados simultaneamente: "+label(p.device);
         }
         Edge e;e.id="device:"+pid;e.a=node[p.terminalA];e.b=node[p.terminalB];e.kind=EdgeKind::Device;
+        e.peContinuous=p.device && p.device->elementInformations().value("qet_electrical_role").toString()=="terminal" && confirmed.contains(pid);
         if(protective(p.device))e.protection=id(p.device->uuid());net.edges<<e;passedDevices.insert(p.device);
     }
     const auto inputWires=data["wires"].toObject();QHash<QString,int> coreOccurrences;
@@ -331,10 +332,15 @@ inline Analysis analyze(QETProject *project,const QJsonObject &data,bool overwri
     if(!a.result.errors.isEmpty())a.result.ready=false;
     QJsonObject input=data;input.remove("loads");input.remove("audit");input.remove("results");input.remove("last_auto_issues");
     QJsonObject topology;
-    for(const auto &e:net.edges)topology.insert(e.id,QJsonArray{nodeIds[e.a],nodeIds[e.b],int(e.kind)});
+    for(const auto &e:net.edges)topology.insert(e.id,QJsonArray{nodeIds[e.a],nodeIds[e.b],int(e.kind),e.peContinuous});
     input["topology"]=topology;input["load_data"]=signatureLoads;
+    input["algorithm_version"]=1;
     a.fingerprint=QString::fromLatin1(QCryptographicHash::hash(QJsonDocument(input).toJson(QJsonDocument::Compact),QCryptographicHash::Sha256).toHex());
     return a;
+}
+inline QString friendly(const Analysis &a,QString text) {
+    auto keys=a.labels.keys();std::sort(keys.begin(),keys.end(),[](const QString &x,const QString &y){return x.size()>y.size();});
+    for(const auto &k:keys)if(!k.isEmpty())text.replace(k,a.labels.value(k));return text;
 }
 class StoreSettings:public QUndoCommand {
     QPointer<QETProject> project;QVariant before;bool hadBefore;QString after;
@@ -382,7 +388,8 @@ inline void applicationCommands(QETProject *project,const QJsonObject &data,cons
     for(const auto &p:a.result.protections)protectionRows<<QJsonObject{{"id",p.id},{"reference",a.labels.value(p.id)},
         {"current",p.current},{"in",p.nominal},{"i2",p.i2},{"breaking",p.breaking},{"thermal",p.thermal},{"ads",p.disconnection}};
     summary={{"fingerprint",a.fingerprint},{"source",a.labels.value(data["source"].toString())},{"wires",wireRows},
-        {"loads",loadRows},{"protections",protectionRows},{"coordination",QJsonArray::fromStringList(a.result.coordination)}};
+        {"loads",loadRows},{"protections",protectionRows}};
+    QJsonArray coordination;for(const auto &line:a.result.coordination)coordination<<friendly(a,line);summary["coordination"]=coordination;
     auto summaries=saved["results"].toObject();summaries[data["source"].toString()]=summary;saved["results"]=summaries;
     const auto &net=a.network;
     for(const auto &w:a.result.wires)if(Conductor *c=a.wires.value(w.id)) {
@@ -390,7 +397,7 @@ inline void applicationCommands(QETProject *project,const QJsonObject &data,cons
         after.m_wire_section=QString::number(w.section,'g',12).replace('.',',')+" mm²";
         RadialSizing::Edge edge;for(const auto &e:net.edges)if(e.id==w.id)edge=e;
         const auto p=net.profiles.value(edge.profile,net.profile);
-        QJsonObject record{{"schema",2},{"source",data["source"]},{"fingerprint",a.fingerprint},
+        QJsonObject record{{"schema",2},{"algorithm_version",1},{"source",data["source"]},{"fingerprint",a.fingerprint},
             {"section",after.m_wire_section},{"current",w.current},{"iz_a",w.ampacity},{"role",roleName(w.role)},
             {"protection",w.protection},{"in_a",a.result.protections.value(w.protection).nominal},
             {"short_circuit_minimum_mm2",w.shortCircuitMinimum},{"harmonic_a",w.harmonic},
@@ -419,8 +426,8 @@ inline QString report(const Analysis &a) {
         .arg(a.result.loads.size()).arg(a.omittedLoads);
     out<<"Resultado condicionado ao perfil declarado; não é certificação integral da instalação.";
     out<<"Calibres automáticos são propostas: confirme os dispositivos/ajustes da instalação antes de usar as seções.";
-    for(const auto &e:a.result.errors)out<<"ERRO: "+e;
-    for(const auto &e:a.result.pending)out<<"PENDENTE: "+e;
+    for(const auto &e:a.result.errors)out<<"ERRO: "+friendly(a,e);
+    for(const auto &e:a.result.pending)out<<"PENDENTE: "+friendly(a,e);
     for(const auto &w:a.result.wires)out<<QStringLiteral("%1 | %2 | Ib=%3 A | S=%4 mm² | Iz=%5 A | proteção %6 | cargas %7")
         .arg(a.labels.value(w.id,w.id),RadialSizing::roleName(w.role)).arg(w.current,0,'g',8)
         .arg(w.section,0,'g',8).arg(w.ampacity,0,'g',8).arg(a.labels.value(w.protection,w.protection)).arg(w.loads.size());
@@ -429,7 +436,7 @@ inline QString report(const Analysis &a) {
     for(const auto &p:a.result.protections)out<<QStringLiteral("PROTEÇÃO %1 | Ib=%2 A | In=%3 A | I2=%4 A | interrupção=%5 | térmico=%6 | seccionamento=%7")
         .arg(a.labels.value(p.id,p.id)).arg(p.current).arg(p.nominal).arg(p.i2)
         .arg(p.breaking?"verificado":"pendente",p.thermal?"verificado":"pendente",p.disconnection?"verificado":"pendente");
-    out<<a.result.coordination;
+    for(const auto &line:a.result.coordination)out<<friendly(a,line);
     out<< (a.result.ready?"Critérios implementados verificados para este domínio; aplicação disponível.":"Há pendências: seções não serão aplicadas.");
     return out.join('\n');
 }

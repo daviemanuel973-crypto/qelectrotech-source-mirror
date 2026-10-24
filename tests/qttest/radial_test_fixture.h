@@ -11,7 +11,7 @@ inline QUuid uuid(const QString &name) {return QUuid::createUuidV5(QUuid("{ba4ed
 inline QString uid(const QString &name) {return uuid(name).toString();}
 inline bool write(const QString &path,bool threePhase=false) {
     QDomDocument doc;auto root=doc.createElement("project");doc.appendChild(root);
-    root.setAttribute("version","0.200.1");root.setAttribute("uuid",uid("project"));
+    root.setAttribute("version","0.200.1");root.setAttribute("uuid",uid(threePhase?"project-three-phase":"project"));
     root.setAttribute("title",threePhase?"DEMONSTRAÇÃO DIDÁTICA — 3F, disjuntor, contator, térmico e motor; dados não são catálogo":
         "DEMONSTRAÇÃO DIDÁTICA — alimentador 20 A, ramais 8 A / 12 A; parâmetros não são catálogo");
     root.appendChild(doc.createElement("properties"));root.appendChild(doc.createElement("newdiagrams"));
@@ -60,6 +60,11 @@ inline bool write(const QString &path,bool threePhase=false) {
         auto terminals=doc.createElement("terminals");for(const auto &p:def.pins){auto t=doc.createElement("terminal");t.setAttribute("id",placed.size()*10+terminals.childNodes().size());t.setAttribute("x",p.second.x());t.setAttribute("y",p.second.y());t.setAttribute("orientation",p.second.y()<0?0:2);terminals.appendChild(t);}e.appendChild(terminals);
         auto properties=doc.createElement("elementInformations");auto all=info;all["label"]=tag;
         for(auto it=all.cbegin();it!=all.cend();++it){auto p=doc.createElement("elementInformation");p.setAttribute("name",it.key());p.setAttribute("show",it.key()=="label"?1:0);p.appendChild(doc.createTextNode(it.value()));properties.appendChild(p);}e.appendChild(properties);
+        auto texts=doc.createElement("dynamic_texts"),text=doc.createElement("dynamic_elmt_text");
+        text.setAttribute("uuid",uid("label:"+tag));text.setAttribute("text_from","ElementInfo");text.setAttribute("x",22);text.setAttribute("y",-12);
+        text.setAttribute("font","Liberation Sans,9,-1,5,50,0,0,0,0,0,Regular");text.setAttribute("rotation",0);text.setAttribute("text_width",-1);
+        auto content=doc.createElement("text");content.appendChild(doc.createTextNode(tag));text.appendChild(content);
+        auto infoName=doc.createElement("info_name");infoName.appendChild(doc.createTextNode("label"));text.appendChild(infoName);texts.appendChild(text);e.appendChild(texts);
         folios[folio].firstChildElement("elements").appendChild(e);fileByTag[tag]=file;placed[tag]=e;
     };
     place(0,"S0",threePhase?"source3":"source",{160,100},{{"qet_electrical_role","source"},{"qet_voltage_v",threePhase?"380":"230"},{"qet_supply",threePhase?"3F":"1F"}});

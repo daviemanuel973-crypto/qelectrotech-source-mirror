@@ -50,6 +50,7 @@ struct Edge {
     QString id,cable,protection,profile; // protection is populated on Device edges.
     int a=-1,b=-1;
     EdgeKind kind=EdgeKind::Wire;
+    bool peContinuous=false; // Explicitly verified unswitched connector path.
     double length=0,temperatureFactor=0,groupingFactor=0,minimum=0;
     double fixedSection=0; // Manual sections remain fixed unless overwrite is explicit.
     int loaded=0;
@@ -220,6 +221,9 @@ inline Result calculate(const Network &net) {
         for(int ei:adjacency[n]) {
             if(ei==parentEdge[n])continue;
             const auto &e=net.edges[ei];const int a=uf.find(e.a),b=uf.find(e.b),next=a==n?b:a;
+            if(root[n]==PE && e.kind==EdgeKind::Device && !e.peContinuous) {
+                fail("PE não pode passar por contato de manobra/proteção: "+e.id);continue;
+            }
             if(root[next]>=0) {fail("Malha, paralelo ou conexão entre funções/domínios: "+e.id);continue;}
             root[next]=root[n];parent[next]=n;parentEdge[next]=ei;protectionAt[next]=protectionAt[n];
             if(e.kind==EdgeKind::Device && !e.protection.isEmpty() && root[next]!=PE) {
@@ -394,7 +398,7 @@ inline Result calculate(const Network &net) {
         for(int ei:it.value())if(phase(Role(root[child[ei]])))phaseProtection.insert(protectionAt[child[ei]]);
         if(phaseProtection.size()!=1) {fail("Cabo sem proteção comum inequívoca para suas fases: "+it.key());continue;}
         const QString id=*phaseProtection.cbegin();
-        for(int ei:it.value())if(root[child[ei]]==N || root[child[ei]]==Minus)protectionAt[child[ei]]=id;
+        for(int ei:it.value())if(root[child[ei]]==N || root[child[ei]]==Minus || root[child[ei]]==PE)protectionAt[child[ei]]=id;
     }
     for(int ei=0;ei<net.edges.size();++ei)if(index[ei]<0 && child[ei]>=0 &&
         net.edges[ei].kind==EdgeKind::Wire && !downstream[ei].isEmpty() && root[child[ei]]!=PE) {
@@ -429,6 +433,8 @@ inline Result calculate(const Network &net) {
         else for(double rating:p.ratings)if(positive(rating) && rating>=pr.current) {pr.nominal=rating;break;}
         if(!positive(pr.nominal) || pr.nominal<pr.current || !positive(p.i2Multiple) || p.i2Multiple<1)
             fail("Proteção não suporta a corrente de projeto: "+it.key());
+        if(p.points.isEmpty() && QStringList{"B","C","D"}.contains(p.curve) && p.i2Multiple<1.45)
+            fail("I2/In abaixo do limite garantido do modelo genérico IEC 60898-1: "+it.key());
         pr.i2=pr.nominal*p.i2Multiple;
         pr.breaking=positive(p.breakingA) && positive(net.sourceFaultMax) && p.breakingA>=net.sourceFaultMax;
         if(!pr.breaking)pending("Capacidade de interrupção insuficiente/não declarada: "+it.key());
