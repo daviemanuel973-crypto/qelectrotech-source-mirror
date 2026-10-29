@@ -32,6 +32,13 @@ jobs:
           path: package
           run-id: ${{ inputs.package_run_id || '40129192499' }}
           github-token: ${{ github.token }}
+      - name: Use Windows dark application theme
+        shell: pwsh
+        run: |
+          $theme = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize'
+          New-Item -Path $theme -Force | Out-Null
+          Set-ItemProperty -Path $theme -Name AppsUseLightTheme -Type DWord -Value 0
+          Set-ItemProperty -Path $theme -Name SystemUsesLightTheme -Type DWord -Value 0
       - run: python misc/capture_windows_menus.py package menu-captures
       - uses: actions/upload-artifact@v4
         if: always()

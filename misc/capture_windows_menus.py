@@ -15,7 +15,7 @@ from PIL import ImageGrab
 from pywinauto import Desktop
 
 
-def capture(root, output, style, language):
+def capture(root, output, style, language, scale):
     output.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='qet menu visual ') as work:
         work = Path(work)
@@ -30,6 +30,7 @@ def capture(root, output, style, language):
         for key in ('QT_PLUGIN_PATH', 'QML2_IMPORT_PATH', 'QML_IMPORT_PATH', 'QT_STYLE_OVERRIDE'):
             env.pop(key, None)
         env['QT_QPA_PLATFORM'] = 'windows'
+        env['QT_SCALE_FACTOR'] = scale
         env['QET_SETTINGS_DIR'] = str(settings.parent)
         if style:
             env['QT_STYLE_OVERRIDE'] = style
@@ -89,6 +90,7 @@ def capture(root, output, style, language):
                 window.type_keys('{ESC}{ESC}')
                 (output / 'capture.json').write_text(json.dumps({
                     'platform': 'Windows', 'style_override': style or 'default',
+                    'qt_scale_factor': scale,
                     'language': language, 'window_title': window.window_text(),
                     'window_rect': [rect.left, rect.top, rect.right, rect.bottom],
                     'client_origin': [point.x, point.y],
@@ -108,8 +110,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('package', type=Path)
     parser.add_argument('output', type=Path)
+    parser.add_argument('--scale', default='1.25')
     args = parser.parse_args()
     ctypes.windll.user32.SetProcessDPIAware()
     for style, language in [('', 'en'), ('Fusion', 'en'), ('', 'pt_BR')]:
         capture(args.package.resolve(), args.output / ((style or 'default') + '-' + language),
-                style, language)
+                style, language, args.scale)
