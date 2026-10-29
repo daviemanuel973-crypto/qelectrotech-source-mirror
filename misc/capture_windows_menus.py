@@ -26,7 +26,7 @@ def capture(root, output, style, language):
         project = work / 'menus.qet'
         shutil.copyfile(root / 'examples' / '741.qet', project)
         env = os.environ.copy()
-        env['PATH'] = str(root / 'bin') + os.pathsep + str(Path(env['SystemRoot']) / 'System32')
+        env['PATH'] = str(root / 'bin') + os.pathsep + str(Path(env.get('SYSTEMROOT', r'C:\Windows')) / 'System32')
         for key in ('QT_PLUGIN_PATH', 'QML2_IMPORT_PATH', 'QML_IMPORT_PATH', 'QT_STYLE_OVERRIDE'):
             env.pop(key, None)
         env['QT_QPA_PLATFORM'] = 'windows'
