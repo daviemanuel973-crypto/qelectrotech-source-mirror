@@ -1,0 +1,18 @@
+{
+  "platform": "Windows",
+  "style_override": "Fusion",
+  "qt_scale_factor": "1.25",
+  "language": "en",
+  "window_title": "Project \u00ab Operational amplifier uA741 : C:/Users/RUNNER~1/AppData/Local/Temp/qet menu visual i06_yax2/menus.qet\u00bb - QElectroTech",
+  "window_rect": [
+    -8,
+    -8,
+    1032,
+    728
+  ],
+  "client_origin": [
+    0,
+    23
+  ],
+  "package_source_commit": "170973ca60cb52ac0caac3db36593f4d164fcdd6"
+}
