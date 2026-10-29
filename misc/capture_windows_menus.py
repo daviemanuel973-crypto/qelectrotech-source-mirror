@@ -15,6 +15,26 @@ from PIL import ImageGrab
 from pywinauto import Desktop
 
 
+def process_windows(pid):
+    user32 = ctypes.windll.user32
+    callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    user32.EnumWindows.argtypes = [callback_type, wintypes.LPARAM]
+    user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    user32.IsWindowVisible.argtypes = [wintypes.HWND]
+    handles = []
+    @callback_type
+    def visit(handle, _):
+        owner = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(handle, ctypes.byref(owner))
+        if owner.value == pid and user32.IsWindowVisible(handle):
+            handles.append(handle)
+        return True
+    if not user32.EnumWindows(visit, 0):
+        raise ctypes.WinError()
+    desktop = Desktop(backend='win32')
+    return [desktop.window(handle=handle).wrapper_object() for handle in handles]
+
+
 def capture(root, output, style, language, scale):
     output.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='qet menu visual ') as work:
@@ -42,22 +62,30 @@ def capture(root, output, style, language, scale):
         with (output / 'process.log').open('w') as log:
             process = subprocess.Popen(command, cwd=work, env=env, stdout=log, stderr=log)
             try:
-                desktop = Desktop(backend='win32')
                 deadline = time.monotonic() + 90
                 window = None
+                backup_answered = False
                 while process.poll() is None and time.monotonic() < deadline:
-                    for candidate in desktop.windows(process=process.pid):
-                        if candidate.window_text() in ('Create a backup copy?', 'Criar uma cópia de segurança?'):
-                            candidate.type_keys('{ESC}')
+                    window = None
+                    for candidate in process_windows(process.pid):
+                        title = candidate.window_text()
+                        if title in ('Create a backup copy?', 'Criar uma cópia de segurança?'):
+                            candidate.post_message(0x0100, 0x1B, 1)
+                            backup_answered = True
+                            continue
                         rect = candidate.rectangle()
-                        if candidate.is_enabled() and rect.width() > 600 and rect.height() > 350:
+                        # Qt also has an enabled, untitled helper window. It
+                        # must never be maximized or mistaken for the editor.
+                        if ('QElectroTech' in title and candidate.is_enabled()
+                                and candidate.style() & 0x00040000
+                                and rect.width() > 600 and rect.height() > 350):
                             window = candidate
-                    if window:
-                        time.sleep(2)
+                    if window and backup_answered:
+                        time.sleep(1)
                         if window.is_enabled():
                             break
                     time.sleep(.2)
-                if not window or process.poll() is not None:
+                if not window or not backup_answered or process.poll() is not None:
                     raise RuntimeError('No ready packaged Windows editor')
                 window.set_focus()
                 window.maximize()
@@ -99,11 +127,8 @@ def capture(root, output, style, language, scale):
                 print(json.dumps(details), flush=True)
                 (output / 'capture.json').write_text(json.dumps(details, indent=2), encoding='utf-8')
                 window.close()
-                try:
-                    process.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    print('Capture complete; editor did not exit after close', flush=True)
-                if process.returncode not in (None, 0):
+                process.wait(timeout=45)
+                if process.returncode:
                     raise RuntimeError('Packaged editor crashed on close')
             finally:
                 if process.poll() is None:
