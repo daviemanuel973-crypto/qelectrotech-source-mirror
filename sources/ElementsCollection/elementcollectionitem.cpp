@@ -256,7 +256,8 @@ QList<ElementCollectionItem *> ElementCollectionItem::items() const
 */
 static bool onGuiThread()
 {
-	return QThread::currentThread() == QCoreApplication::instance()->thread();
+	const auto *application = QCoreApplication::instance();
+	return application && QThread::currentThread() == application->thread();
 }
 
 /**
