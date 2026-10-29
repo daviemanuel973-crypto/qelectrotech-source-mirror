@@ -1,0 +1,1 @@
+uia_element_info.UIAElementInfo - '',  (L0, T0, R1024, B23)

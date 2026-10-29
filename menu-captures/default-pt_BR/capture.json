@@ -1,0 +1,18 @@
+{
+  "platform": "Windows",
+  "style_override": "default",
+  "qt_scale_factor": "1.25",
+  "language": "pt_BR",
+  "window_title": "",
+  "window_rect": [
+    -3,
+    -3,
+    1027,
+    771
+  ],
+  "client_origin": [
+    0,
+    23
+  ],
+  "package_source_commit": "170973ca60cb52ac0caac3db36593f4d164fcdd6"
+}

@@ -1,0 +1,9 @@
+2026-10-29 18:57:38.463 Warning: failed to load "qt_en" "D:/a/qelectrotech-source-mirror/qelectrotech-source-mirror/package/bin/share/qt6/translations" ( D:/a/qelectrotech-source-mirror/qelectrotech-source-mirror/sources/qetapp.cpp 294 setLanguage ) (D:/a/qelectrotech-source-mirror/qelectrotech-source-mirror/sources/qetapp.cpp:292, void QETApp::setLanguage(const QString&))
+2026-10-29 18:57:38.463 Warning: failed to load "qt_en" "D:/a/qelectrotech-source-mirror/qelectrotech-source-mirror/package/lang/" ( D:/a/qelectrotech-source-mirror/qelectrotech-source-mirror/sources/qetapp.cpp 298 setLanguage ) (D:/a/qelectrotech-source-mirror/qelectrotech-source-mirror/sources/qetapp.cpp:296, void QETApp::setLanguage(const QString&))
+2026-10-29 18:57:39.968 Info: SQLite version:  "3.54.0" 
+2026-10-29 18:57:39.980 Info: Project opened with every folio built: a folio has no saved uuid 
+2026-10-29 18:57:40.429 Info: Elements collection reload 
+2026-10-29 18:57:40.690 Info: Project database filled from the folios: a folio has no saved uuid 
+2026-10-29 18:57:40.733 Info: Project content built in 0.751 seconds (elements collection 0, diagrams 0.446, terminal strips 0, cables 0, refresh 0.262, database 0.043) 
+2026-10-29 18:57:40.733 Info: Project "menus.qet" (124 KiB) opened in 0.763 seconds (xml parsing 0.007, content 0.756) 
+2026-10-29 18:57:41.379 Info: Elements collection finished to be loaded in 0.95 seconds 
