@@ -147,6 +147,41 @@ void QETStyle::drawControl(ControlElement element,
                            QPainter *painter,
                            const QWidget *widget) const
 {
+#ifdef Q_OS_WIN
+	// Keep the menu bar's background and text in the same palette. Native
+	// Windows theme painting can disagree with the application's dark/custom
+	// palette; changing the application style alone does not control both
+	// halves. Paint this small surface with Qt's common text renderer instead
+	// of delegating its labels back to the native theme. QMenuBar still owns
+	// layout, hit testing, overflow, mnemonics and keyboard navigation.
+	if (element == CE_MenuBarEmptyArea) {
+		painter->fillRect(option->rect, option->palette.brush(QPalette::Window));
+		return;
+	}
+	if (element == CE_MenuBarItem) {
+		if (const auto *item = qstyleoption_cast<const QStyleOptionMenuItem *>(option)) {
+			QStyleOptionMenuItem copy = *item;
+			const bool enabled = item->state & State_Enabled;
+			const bool selected = enabled && (item->state & State_Selected);
+			const auto group = enabled ? item->palette.currentColorGroup() : QPalette::Disabled;
+			const QColor face = item->palette.color(group, selected ? QPalette::Highlight : QPalette::Window);
+			QColor ink = item->palette.color(group, selected ? QPalette::HighlightedText : QPalette::WindowText);
+			// Saved palettes can outlive an OS theme change. Enabled menu
+			// titles must remain readable even with an inconsistent pair.
+			if (enabled && QET::Palette::contrastRatio(face, ink) < 4.5) {
+				ink = QET::Palette::contrastRatio(face, Qt::black)
+				      >= QET::Palette::contrastRatio(face, Qt::white) ? Qt::black : Qt::white;
+			}
+			copy.palette.setColor(group, QPalette::ButtonText, ink);
+			painter->save();
+			painter->fillRect(item->rect, face);
+			painter->setFont(item->font);
+			QCommonStyle::drawControl(element, &copy, painter, widget);
+			painter->restore();
+			return;
+		}
+	}
+#endif
 	if (element == CE_MenuItem)
 	{
 		const auto *item = qstyleoption_cast<const QStyleOptionMenuItem *>(option);
@@ -163,6 +198,20 @@ void QETStyle::drawControl(ControlElement element,
 		}
 	}
 	QProxyStyle::drawControl(element, option, painter, widget);
+}
+
+void QETStyle::drawPrimitive(PrimitiveElement element,
+                             const QStyleOption *option,
+                             QPainter *painter,
+                             const QWidget *widget) const
+{
+#ifdef Q_OS_WIN
+	if (element == PE_PanelMenuBar) {
+		painter->fillRect(option->rect, option->palette.brush(QPalette::Window));
+		return;
+	}
+#endif
+	QProxyStyle::drawPrimitive(element, option, painter, widget);
 }
 
 /**

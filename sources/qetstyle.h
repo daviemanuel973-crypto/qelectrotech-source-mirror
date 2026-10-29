@@ -57,6 +57,10 @@ class QETStyle : public QProxyStyle
 		                 const QStyleOption *option,
 		                 QPainter *painter,
 		                 const QWidget *widget = nullptr) const override;
+		void drawPrimitive(PrimitiveElement element,
+		                   const QStyleOption *option,
+		                   QPainter *painter,
+		                   const QWidget *widget = nullptr) const override;
 
 		/// True when fewer than a fifth of the visible pixels are saturated.
 		static bool isLineArt(const QImage &image);

@@ -839,8 +839,13 @@ QETResult ProjectView::doSave()
 	}
 
 	// write to file
+	QPointer<Diagram> previous_diagram = currentDiagram() ? currentDiagram()->diagram() : nullptr;
 	bool cancelled = false;
 	QETResult result = writeProject(&cancelled);
+	// Automatic documentation may add/remove tabs; keep the source folio
+	// the user was editing selected after saving.
+	if (previous_diagram && m_project->folioIndex(previous_diagram.data()) >= 0)
+		showDiagram(previous_diagram.data());
 	if (cancelled) return(QETResult());
 	updateWindowTitle();
 	// This marks the stack's current index as the new "saved" point (so isClean()/cleanChanged() correctly

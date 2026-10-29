@@ -282,6 +282,13 @@ function(qet_add_app_test name)
   target_link_libraries(${name} PRIVATE qelectrotech_objects Qt::Test)
 endfunction()
 
+add_executable(tst_radialsizing tst_radialsizing.cpp)
+target_include_directories(tst_radialsizing PRIVATE ${QET_DIR}/sources)
+target_link_libraries(tst_radialsizing PRIVATE Qt::Test)
+add_test(NAME tst_radialsizing COMMAND tst_radialsizing)
+qet_add_app_test(tst_projectcircuitsizing tst_projectcircuitsizing.cpp radial_test_fixture.h)
+set_tests_properties(tst_projectcircuitsizing PROPERTIES TIMEOUT 180)
+
 # Space on a picture turns its own transform, which the file saves (#1413),
 # alone and with a group.
 qet_add_app_test(tst_rotateselectionimage tst_rotateselectionimage.cpp)
@@ -1224,6 +1231,9 @@ add_executable(
   ${QET_DIR}/sources/container/qetzip.cpp
   ${QET_DIR}/sources/container/miniz/miniz.c)
 add_test(NAME tst_resaveunchanged COMMAND tst_resaveunchanged)
+# This corpus performs hundreds of real saves/reopens (422 s in the
+# validated Debug run). A CI-wide --timeout 300 must not truncate it.
+set_tests_properties(tst_resaveunchanged PROPERTIES TIMEOUT 900)
 add_dependencies(tst_resaveunchanged qelectrotech)
 target_include_directories(tst_resaveunchanged PRIVATE ${QET_DIR}/sources)
 target_link_libraries(tst_resaveunchanged PRIVATE Qt::Test SQLite3::SQLite3)
@@ -1457,6 +1467,9 @@ if(QET_HAS_SCRIPTING)
     ${QET_DIR}/sources/container/qetzip.cpp
     ${QET_DIR}/sources/container/miniz/miniz.c)
   add_test(NAME tst_lazysaveparity COMMAND tst_lazysaveparity)
+  # Full eager/lazy edit parity across both formats took 446 s locally.
+  # Keep the assertions and give this bounded integration its own budget.
+  set_tests_properties(tst_lazysaveparity PROPERTIES TIMEOUT 900)
   add_dependencies(tst_lazysaveparity qelectrotech)
   target_include_directories(tst_lazysaveparity PRIVATE ${QET_DIR}/sources)
   target_link_libraries(tst_lazysaveparity PRIVATE Qt::Test SQLite3::SQLite3)

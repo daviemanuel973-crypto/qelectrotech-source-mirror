@@ -68,6 +68,10 @@
 #include "ui/projectpropertiesdialog.h"
 #include "projectview.h"
 #include "qetproject.h"
+#include "automation/autowireproperties.h"
+#include "automation/projectcircuitsizingui.h"
+#include "automation/symbollegend.h"
+#include "automation/industrialdocumentation.h"
 #include "qetgraphicsitem/ViewItem/qetgraphicstableitem.h"
 #include "qetgraphicsitem/conductortextitem.h"
 #include "qetgraphicsitem/dynamicelementtextitem.h"
@@ -1631,6 +1635,56 @@ void QETDiagramEditor::setUpMenu()
 	m_align_menu -> addActions(m_align_actions_group.actions().mid(4));
 	menu_edition -> addSeparator();
 	menu_edition -> addAction(m_conductor_reset);
+	// Native and undoable educational wire-property inference.
+	QMenu *industrial = menuBar()->addMenu(tr("Industrial"));
+	connect(industrial->addAction(tr("Dimensionar alimentação, derivações, neutro e PE...")), &QAction::triggered,
+		this,[this](){ProjectCircuitSizing::run(this,currentProject());});
+	QAction *auto_wire_props = industrial->addAction(tr("Dimensionar condutores / identificar fios..."));
+	connect(auto_wire_props, &QAction::triggered, this, [this]() {
+		AutoWireProperties::run(this, currentProject());
+	});
+	QAction *wire_report = industrial->addAction(tr("Ver características técnicas dos fios..."));
+	connect(wire_report, &QAction::triggered, this, [this]() {
+		AutoWireProperties::showReport(this, currentProject());
+	});
+	QAction *wire_trace = industrial->addAction(tr("Rastrear conexões elétricas do projeto..."));
+	connect(wire_trace, &QAction::triggered, this, [this]() {
+		WireTrace::showReport(this, currentProject());
+	});
+	QAction *wire_path = industrial->addAction(tr("Percorrer circuito por elementos e setas entre folhas..."));
+	connect(wire_path, &QAction::triggered, this, [this]() {
+		WireTrace::showPaths(this, currentProject());
+	});
+	QAction *graphic_legend = industrial->addAction(tr("Gerar simbologia gráfica e tabelas (PDF)..."));
+	connect(graphic_legend, &QAction::triggered, this, [this]() {
+		IndustrialDocumentation::exportPdf(this, currentProject());
+	});
+	QAction *doc_bornes = industrial->addAction(tr("Identificar bornes na documentação (sem texto no desenho)..."));
+	connect(doc_bornes, &QAction::triggered, this, [this]() {
+		SymbolLegend::setDocumentReferences(this, currentProject());
+	});
+    connect(industrial->addAction(tr("Editar dados elétricos das cargas...")), &QAction::triggered,
+        this,[this](){ElectricalData::edit(this,currentProject());});
+    connect(industrial->addAction(tr("Gerar/atualizar lista de materiais...")), &QAction::triggered,
+        this,[this](){IndustrialDocumentation::generateMaterials(this,currentProject());});
+    connect(industrial->addAction(tr("Gerar/atualizar simbologia...")), &QAction::triggered,
+        this,[this](){IndustrialDocumentation::generateSymbols(this,currentProject());});
+    auto *auto_lists=industrial->addAction(tr("Atualizar materiais e simbologia ao salvar"));
+    auto_lists->setCheckable(true);
+    auto_lists->setToolTip(tr("Ao salvar, substitui as folhas automáticas das duas listas com os dados atuais dos componentes. Mantenha textos próprios em folhas manuais."));
+    connect(industrial,&QMenu::aboutToShow,this,[this,auto_lists](){
+        auto *project=currentProject();
+        auto_lists->setEnabled(project && !project->isReadOnly());
+        auto_lists->setChecked(IndustrialDocumentation::autoRefreshEnabled(project));
+    });
+    connect(auto_lists,&QAction::triggered,this,[this](bool enabled){
+        IndustrialDocumentation::setAutoRefresh(currentProject(),enabled);
+    });
+    connect(industrial->addAction(tr("Gerar/atualizar documentação completa em folhas editáveis...")), &QAction::triggered,
+        this,[this](){IndustrialDocumentation::generateSheets(this,currentProject());});
+    connect(industrial->addAction(tr("Exportar tabelas CSV...")), &QAction::triggered,
+        this,[this](){IndustrialDocumentation::exportCsv(this,currentProject());});
+
 	menu_edition -> addSeparator();
 	menu_edition -> addAction(m_edit_diagram_properties);
 		//Shared with the folio's context menu (see

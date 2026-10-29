@@ -20,6 +20,8 @@
 
 #include <QStandardItemModel>
 #include <QHash>
+#include <QFutureWatcher>
+#include <QPointer>
 #include "elementslocation.h"
 
 class XmlProjectElementCollectionItem;
@@ -36,6 +38,7 @@ class ElementsCollectionModel : public QStandardItemModel
 	public:
 		ElementsCollectionModel(QObject *parent = Q_NULLPTR);
 		~ElementsCollectionModel() override;
+		void cancelLoading();
 
 		QVariant data(const QModelIndex &index, int role) const override;
 		QMimeData *mimeData(const QModelIndexList &indexes) const override;
@@ -80,6 +83,7 @@ class ElementsCollectionModel : public QStandardItemModel
 		QHash <QETProject *, XmlProjectElementCollectionItem *> m_project_hash;
 		bool m_hide_element = false;
 		QFuture<void> m_future;
+		QPointer<QFutureWatcher<void>> m_loading_watcher;
 		QList <ElementCollectionItem *> m_items_list_to_setUp;
 };
 

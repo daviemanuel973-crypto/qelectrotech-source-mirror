@@ -1,0 +1,281 @@
+name: Testar QET entradas eletricas e dimensionamento
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Branch ou commit industrial a compilar
+        default: feature/dados-eletricos-dimensionamento
+        type: string
+  workflow_call:
+    inputs:
+      source_ref:
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - name: Baixar o codigo QET deste repositorio
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+          ref: ${{ inputs.source_ref || github.event.pull_request.head.sha || github.sha }}
+
+      - name: Instalar ambiente Windows (MSYS2, Qt6 e KDE6)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          cache: true
+          install: >-
+            git
+            mingw-w64-ucrt-x86_64-python
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-qt6-base
+            mingw-w64-ucrt-x86_64-qt6-svg
+            mingw-w64-ucrt-x86_64-qt6-tools
+            mingw-w64-ucrt-x86_64-qt6-translations
+            mingw-w64-ucrt-x86_64-qt6-pdf
+            mingw-w64-ucrt-x86_64-sqlite3
+            mingw-w64-ucrt-x86_64-pkg-config
+            mingw-w64-ucrt-x86_64-kwidgetsaddons
+            mingw-w64-ucrt-x86_64-kcoreaddons
+            mingw-w64-ucrt-x86_64-extra-cmake-modules
+            mingw-w64-ucrt-x86_64-angleproject
+            mingw-w64-ucrt-x86_64-qt6-declarative
+
+      - name: Conferir integração nativa
+        shell: msys2 {0}
+        run: |
+          test -s sources/automation/autowireproperties.h
+          grep -q 'AutoWireProperties::run' sources/qetdiagrameditor.cpp
+          grep -q 'IndustrialDocumentation::generateSheets' sources/qetdiagrameditor.cpp
+
+      - name: Testar os calculos C++ isoladamente
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          g++ -std=c++17 -Wall -Wextra -Werror tests/custom/test_wireprecalc.cpp -o test_wireprecalc.exe
+          ./test_wireprecalc.exe
+
+      - name: Compilar o executavel QElectroTech.exe
+        id: compilacao
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH=/ucrt64 \
+            -DQt6_DIR=/ucrt64/lib/cmake/Qt6 \
+            -DQT_VERSION_MAJOR=6 \
+            -DBUILD_WITH_KF=ON \
+            -DBUILD_KF=OFF \
+            -DPACKAGE_TESTS=ON \
+            -DCMAKE_POLICY_DEFAULT_CMP0077=NEW \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+            -DQET_EXPORT_PROJECT_DB=ON \
+            -DQET_ENABLE_SPACEMOUSE=OFF \
+            -DSQLite3_INCLUDE_DIR=/ucrt64/include \
+            -DSQLite3_LIBRARY=/ucrt64/lib/libsqlite3.dll.a
+          cmake --build build --parallel 4
+          EXE=$(find "$GITHUB_WORKSPACE/build" -maxdepth 3 -iname 'qelectrotech.exe' | head -1)
+          test -n "$EXE"
+          test -s "$EXE"
+          echo "Executavel compilado: $EXE"
+
+      - name: Testar propriedades reais do QET em projeto (salvar/reabrir, desfazer e geometria)
+        id: integracao
+        shell: msys2 {0}
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          EXE=$(find "$GITHUB_WORKSPACE/build" -maxdepth 3 -iname 'qelectrotech.exe' | head -1)
+          test -s "$EXE"
+          /ucrt64/bin/python.exe tests/qttest/run_lazy_folios_probe.py \
+            --build "$GITHUB_WORKSPACE/build" \
+            --binary "$EXE" \
+            --source "$GITHUB_WORKSPACE/tests/qttest/wire_properties_probe.cpp" \
+            --fixture "$GITHUB_WORKSPACE/examples/industrial.qet" \
+            --output-dir "$GITHUB_WORKSPACE/build/industrial-validation"
+          test -s "$GITHUB_WORKSPACE/build/industrial-validation/results.txt"
+          grep -q 'PASS QET native integration' "$GITHUB_WORKSPACE/build/industrial-validation/results.txt"
+
+      - name: Verify that the menu regression test detects the delivered renderer
+        shell: msys2 {0}
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          set -euo pipefail
+          # Rebuild only the icon/style test with the delivered implementation.
+          # The packaged application remains the current build throughout.
+          cp sources/qetstyle.cpp build/qetstyle-current.cpp
+          cp sources/qetstyle.h build/qetstyle-current.h
+          restore_menu_style() {
+            cp build/qetstyle-current.cpp sources/qetstyle.cpp
+            cp build/qetstyle-current.h sources/qetstyle.h
+          }
+          trap restore_menu_style EXIT
+          git fetch --depth=1 origin 170973ca60cb52ac0caac3db36593f4d164fcdd6
+          git show 170973ca60cb52ac0caac3db36593f4d164fcdd6:sources/qetstyle.cpp > sources/qetstyle.cpp
+          git show 170973ca60cb52ac0caac3db36593f4d164fcdd6:sources/qetstyle.h > sources/qetstyle.h
+          cmake --build build --target tst_qeticons --parallel 4
+          set +e
+          build/tests/qttest/tst_qeticons.exe windowsMenuBarLabels:blank-menu-backend-dark-normal-active -o build/menu-before.txt,txt
+          before_status=$?
+          set -e
+          cat build/menu-before.txt
+          test "$before_status" -ne 0
+          grep -q 'Menu label is blank, clipped or has insufficient contrast' build/menu-before.txt
+          restore_menu_style
+          trap - EXIT
+          cmake --build build --target tst_qeticons --parallel 4
+          build/tests/qttest/tst_qeticons.exe windowsMenuBarLabels -o build/menu-after.txt,txt
+          cat build/menu-after.txt
+
+      - name: Rodar testes automatizados disponiveis
+        id: testes
+        shell: msys2 {0}
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QET_RADIAL_DELIVERY_DIR: ${{ github.workspace }}/build/radial-validation
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/build"
+          set +e
+          ctest --output-on-failure --timeout 300 --no-tests=error > ctest-windows.log 2>&1
+          qet_ctest_status=$?
+          set -e
+          cat ctest-windows.log
+          if test "$qet_ctest_status" -ne 0 && test -f Testing/Temporary/LastTestsFailed.log; then
+            while IFS=: read -r qet_test_number qet_test_name; do
+              qet_test_name="${qet_test_name%$'\r'}"
+              if [[ "$qet_test_name" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+                echo "::error title=CTest Windows::Teste reprovado: $qet_test_name"
+              fi
+            done < Testing/Temporary/LastTestsFailed.log
+          fi
+          exit "$qet_ctest_status"
+
+      - name: Conferir demonstracoes nativas do dimensionamento
+        id: dimensionamento
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          test -s "$GITHUB_WORKSPACE/build/radial-validation/QET-Dimensionamento-Demonstracao.qet"
+          test -s "$GITHUB_WORKSPACE/build/radial-validation/QET-Dimensionamento-Documentacao.pdf"
+          test -s "$GITHUB_WORKSPACE/build/radial-validation/QET-Motor-Trifasico-Demonstracao.qet"
+          test -s "$GITHUB_WORKSPACE/build/radial-validation/Relatorio-Motor-Trifasico.txt"
+
+      - name: Gerar pasta portatil Windows com dependencias
+        id: pacote
+        if: ${{ success() && steps.compilacao.outcome == 'success' && steps.integracao.outcome == 'success' && steps.testes.outcome == 'success' && steps.dimensionamento.outcome == 'success' }}
+        shell: msys2 {0}
+        env:
+          QET_NATIVE_TESTS: ${{ steps.integracao.outcome }}
+          QET_CTEST: ${{ steps.testes.outcome }}
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          DEST="$GITHUB_WORKSPACE/QET-ForcaComando-Portatil"
+          mkdir -p "$DEST/bin" "$DEST/conf" "$DEST/lang"
+          EXE=$(find "$GITHUB_WORKSPACE/build" -maxdepth 3 -iname 'qelectrotech.exe' | head -1)
+          cp "$EXE" "$DEST/bin/QElectroTech.exe"
+          cd "$DEST/bin"
+          /ucrt64/bin/windeployqt6 --release --no-translations --no-compiler-runtime ./QElectroTech.exe
+          # Pacote C++ MinGW
+          cp /ucrt64/bin/libgcc_s_seh-1.dll .
+          cp /ucrt64/bin/libstdc++-6.dll .
+          cp /ucrt64/bin/libwinpthread-1.dll .
+          # DLLs transitivas, conforme pratica do workflow oficial Windows do QET.
+          for pass in 1 2 3; do
+            while IFS= read -r f; do
+              test -f "$f" || continue
+              while IFS= read -r dll; do
+                test -f "$dll" || continue
+                cp -n "$dll" . || true
+              done < <(ldd "$f" 2>/dev/null | awk '/=> \/ucrt64\/bin\// {print $3}')
+            done < <(find . -type f \( -iname '*.dll' -o -iname '*.exe' \))
+          done
+          cp -r "$GITHUB_WORKSPACE/elements" "$DEST/elements"
+          cp -r "$GITHUB_WORKSPACE/titleblocks" "$DEST/titleblocks"
+          cp -r "$GITHUB_WORKSPACE/fonts" "$DEST/fonts" || true
+          cp -r "$GITHUB_WORKSPACE/examples" "$DEST/examples" || true
+          cp "$GITHUB_WORKSPACE/misc/Abrir-QET-Industrial.bat" "$DEST/Abrir QElectroTech.bat"
+          cp "$GITHUB_WORKSPACE/docs/industrial/README.md" "$DEST/LEIA-ME.md"
+          cp "$GITHUB_WORKSPACE/docs/industrial/DIMENSIONAMENTO.md" "$DEST/DIMENSIONAMENTO.md"
+          mkdir -p "$DEST/validation" "$DEST/documentacao"
+          cp "$GITHUB_WORKSPACE/build/industrial-validation/results.txt" "$DEST/validation/" 2>/dev/null || true
+          cp "$GITHUB_WORKSPACE/build/industrial-validation/"QET-Industrial-* "$DEST/documentacao/" 2>/dev/null || true
+          cp -r "$GITHUB_WORKSPACE/build/radial-validation" "$DEST/documentacao/dimensionamento"
+          cp "$GITHUB_WORKSPACE/build/Testing/Temporary/LastTest.log" "$DEST/validation/" 2>/dev/null || true
+          git rev-parse HEAD > "$DEST/validation/source-commit.txt"
+          find "$GITHUB_WORKSPACE/build/lang" -maxdepth 1 -name 'qet_*.qm' -exec cp {} "$DEST/lang/" \; 2>/dev/null || true
+          for file in "$GITHUB_WORKSPACE"/LICENSE* "$GITHUB_WORKSPACE"/ELEMENTS.LICENSE; do
+            test -f "$file" && cp "$file" "$DEST/" || true
+          done
+          test -s "$DEST/bin/QElectroTech.exe"
+          test -d "$DEST/elements"
+          printf 'QElectroTech Industrial\nCommit: %s\nAções: Dimensionar alimentação/derivações/neutro/PE; recalcular ao salvar; documentar bornes; materiais e simbologia automáticos; rastrear circuitos e setas.\nTestes matemáticos, integração nativa e CTest passaram antes do empacotamento. O pacote também exige abertura real no Windows. Consulte validation/build-info.json.\nCálculos condicionados aos perfis/dados declarados; sem certificação integral NBR 5410.\n' "$(git rev-parse HEAD)" > "$DEST/LEIA-ME-STATUS-VALIDACAO.txt"
+          cd "$GITHUB_WORKSPACE"
+          /ucrt64/bin/python.exe misc/verify_windows_portable.py "$DEST"
+          echo 'Pacote preparado e inicialização isolada verificada.'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Validate visible menu titles and mouse and keyboard input on Windows
+        id: menus
+        shell: pwsh
+        run: |
+          python -m pip install pillow==11.3.0 pywinauto==0.6.9
+          $theme = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize'
+          New-Item -Path $theme -Force | Out-Null
+          Set-ItemProperty -Path $theme -Name AppsUseLightTheme -Type DWord -Value 0
+          Set-ItemProperty -Path $theme -Name SystemUsesLightTheme -Type DWord -Value 0
+          python misc/capture_windows_menus.py QET-ForcaComando-Portatil QET-ForcaComando-Portatil/validation/windows-menus
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Disponibilizar download do aplicativo Windows
+        if: ${{ success() && steps.pacote.outcome == 'success' && steps.menus.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: QET-WINDOWS-COMPILADO-${{ job.status }}
+          path: QET-ForcaComando-Portatil/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Keep menu screenshots and regression logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: QET-Windows-menu-validation
+          path: |
+            QET-ForcaComando-Portatil/validation/windows-menus/
+            build/menu-before.txt
+            build/menu-after.txt
+          if-no-files-found: ignore
+
+      - name: Guardar logs se a compilacao falhar
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: QET-compilacao-logs
+          path: |
+            build/CMakeFiles/*.log
+            build/Testing/Temporary/*.log
+            build/industrial-validation/results.txt
+          if-no-files-found: ignore
