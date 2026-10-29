@@ -1,0 +1,82 @@
+2026-10-29 20:17:10.922 Warning: failed to load "qt_pt_BR" "D:/a/qelectrotech-source-mirror/qelectrotech-source-mirror/package/bin/share/qt6/translations" ( D:/a/qelectrotech-source-mirror/qelectrotech-source-mirror/sources/qetapp.cpp 294 setLanguage ) (D:/a/qelectrotech-source-mirror/qelectrotech-source-mirror/sources/qetapp.cpp:292, void QETApp::setLanguage(const QString&))
+2026-10-29 20:17:10.922 Warning: failed to load "qt_pt_BR" "D:/a/qelectrotech-source-mirror/qelectrotech-source-mirror/package/lang/" ( D:/a/qelectrotech-source-mirror/qelectrotech-source-mirror/sources/qetapp.cpp 298 setLanguage ) (D:/a/qelectrotech-source-mirror/qelectrotech-source-mirror/sources/qetapp.cpp:296, void QETApp::setLanguage(const QString&))
+2026-10-29 20:17:12.078 Info: SQLite version:  "3.54.0" 
+2026-10-29 20:17:12.089 Info: Project opened with every folio built: a folio has no saved uuid 
+2026-10-29 20:17:12.318 Info: Project database filled from the folios: a folio has no saved uuid 
+2026-10-29 20:17:12.332 Info: Project content built in 0.243 seconds (elements collection 0, diagrams 0.224, terminal strips 0, cables 0, refresh 0.005, database 0.014) 
+2026-10-29 20:17:12.332 Info: Project "menus.qet" (124 KiB) opened in 0.253 seconds (xml parsing 0.006, content 0.247) 
+2026-10-29 20:17:12.379 Info: Elements collection reload 
+2026-10-29 20:17:13.018 Info: Start-up 
+2026-10-29 20:17:13.019 Info: debugging enabled: false 
+2026-10-29 20:17:13.019 Info: Qt library version: QVersionNumber(6.12.0) 
+2026-10-29 20:17:13.019 Info: Qt library path default prefix: "D:/a/qelectrotech-source-mirror/qelectrotech-source-mirror/package/bin" 
+2026-10-29 20:17:13.019 Info: Qt library path documentation: "D:/a/qelectrotech-source-mirror/qelectrotech-source-mirror/package/bin/share/qt6/doc" 
+2026-10-29 20:17:13.019 Info: Qt library path headers: "D:/a/qelectrotech-source-mirror/qelectrotech-source-mirror/package/bin/include/qt6" 
+2026-10-29 20:17:13.019 Info: Qt library path libraries: "D:/a/qelectrotech-source-mirror/qelectrotech-source-mirror/package/bin/lib" 
+2026-10-29 20:17:13.019 Info: Qt library path executables: "D:/a/qelectrotech-source-mirror/qelectrotech-source-mirror/package/bin/share/qt6/bin" 
+2026-10-29 20:17:13.019 Info: Qt library path Qt binaries: "D:/a/qelectrotech-source-mirror/qelectrotech-source-mirror/package/bin/bin" 
+2026-10-29 20:17:13.019 Info: Qt library path Qt plugins: "D:/a/qelectrotech-source-mirror/qelectrotech-source-mirror/package/bin/share/qt6/plugins" 
+2026-10-29 20:17:13.019 Info: Qt library path installed QML extensions: "D:/a/qelectrotech-source-mirror/qelectrotech-source-mirror/package/bin/share/qt6/qml" 
+2026-10-29 20:17:13.019 Info: Qt library path dependent Qt data: "D:/a/qelectrotech-source-mirror/qelectrotech-source-mirror/package/bin/share/qt6" 
+2026-10-29 20:17:13.019 Info: Qt library path independent Qt data: "D:/a/qelectrotech-source-mirror/qelectrotech-source-mirror/package/bin/share/qt6" 
+2026-10-29 20:17:13.019 Info: Qt library path translation: "D:/a/qelectrotech-source-mirror/qelectrotech-source-mirror/package/bin/share/qt6/translations" 
+2026-10-29 20:17:13.019 Info: Qt library path examples: "D:/a/qelectrotech-source-mirror/qelectrotech-source-mirror/package/bin/examples" 
+2026-10-29 20:17:13.019 Info: Qt library path Qt testcases: "D:/a/qelectrotech-source-mirror/qelectrotech-source-mirror/package/bin/tests" 
+2026-10-29 20:17:13.019 Info: "GitRevision 8348877dccd8d2fb2b282f5a16781276ed6ea104" 
+2026-10-29 20:17:13.019 Info: "QElectroTech V 0.200.1-dev" 
+2026-10-29 20:17:13.019 Info: "Compilação: GCC 16.2.0" 
+2026-10-29 20:17:13.019 Info: "Built with Qt 6.12.0 - x86_64 - Date : Oct 29 2026 : 19:16:33" 
+2026-10-29 20:17:13.019 Info: "Run with Qt 6.12.0 using 4 thread(s)" 
+2026-10-29 20:17:13.019 Info: "CPU : " 
+2026-10-29 20:17:13.019 Info: "RAM Total : 16 GB" 
+2026-10-29 20:17:13.019 Info: "RAM Available : 13 GB" 
+2026-10-29 20:17:13.019 Info: "GPU : " 
+2026-10-29 20:17:13.019 Info: "GPU RAM : RAM Total :  B" 
+2026-10-29 20:17:13.019 Info: "OS : winnt  - x86_64 - Version : Windows Server 2025 Version 24H2 - Kernel : 10.0.26100" 
+2026-10-29 20:17:13.019 Info:  
+2026-10-29 20:17:13.019 Info:  OS System language: "en_US" 
+2026-10-29 20:17:13.019 Info:  OS System Native Country Name: "United States" 
+2026-10-29 20:17:13.019 Info:  OS System Native Language Name: "English" 
+2026-10-29 20:17:13.019 Info:  
+2026-10-29 20:17:13.019 Info:  System language defined in QET configuration: "pt_BR" 
+2026-10-29 20:17:13.019 Info:  language Path: "D:/a/qelectrotech-source-mirror/qelectrotech-source-mirror/package/lang/" 
+2026-10-29 20:17:13.019 Info:  Loaded QET translation: "D:/a/qelectrotech-source-mirror/qelectrotech-source-mirror/package/lang/qet_pt_BR.qm" 
+2026-10-29 20:17:13.019 Info:  Loaded Qt translation: "" 
+2026-10-29 20:17:13.019 Info:  Common Elements Dir: "D:/a/qelectrotech-source-mirror/qelectrotech-source-mirror/package/elements/" 
+2026-10-29 20:17:13.019 Info:  Common TitleBlock Templates Dir: "D:/a/qelectrotech-source-mirror/qelectrotech-source-mirror/package/titleblocks/" 
+2026-10-29 20:17:13.019 Info:  Custom Elements Dir: "C:/Users/RUNNER~1/AppData/Local/Temp/qet menu visual jr43kso8/elements/" 
+2026-10-29 20:17:13.019 Info:  Custom TitleBlock Templates Dir: "C:/Users/RUNNER~1/AppData/Local/Temp/qet menu visual jr43kso8/titleblocks/" 
+2026-10-29 20:17:13.019 Info:  Company Elements Dir: "C:/Users/RUNNER~1/AppData/Local/Temp/qet menu visual jr43kso8/elements-company/" 
+2026-10-29 20:17:13.019 Info:  Company TitleBlock Templates Dir: "C:/Users/RUNNER~1/AppData/Local/Temp/qet menu visual jr43kso8/titleblocks-company/" 
+2026-10-29 20:17:13.019 Info:  
+2026-10-29 20:17:13.019 Info:  App-Config: see Registry "HKEY_CURRENT_USER/Software/QElectroTech/" 
+2026-10-29 20:17:13.019 Info:  additional config-files: 
+2026-10-29 20:17:13.019 Info:  App Config Location: "C:/Users/RUNNER~1/AppData/Local/Temp/qet menu visual jr43kso8" 
+2026-10-29 20:17:13.019 Info:  For data-files (user-/company-collections, titleblocks, etc.): 
+2026-10-29 20:17:13.019 Info:  App Data Location: "C:/Users/RUNNER~1/AppData/Local/Temp/qet menu visual jr43kso8" 
+2026-10-29 20:17:13.019 Info:  Directory for project stalefiles: 
+2026-10-29 20:17:13.019 Info:  Generic Data Location: "C:/Users/runneradmin/AppData/Local/stalefiles/QElectroTech/" 
+2026-10-29 20:17:13.019 Info:  
+2026-10-29 20:17:13.019 Info:  Count the elements in your collections (Official-common-collection, company-collections, custom-collections): 
+2026-10-29 20:17:13.042 Info: Elements collection finished to be loaded in 0.662 seconds 
+2026-10-29 20:17:13.065 Info:  Common Elements count: 8839 Elements 
+2026-10-29 20:17:13.065 Info:  Custom Elements count: 0 Elements 
+2026-10-29 20:17:13.065 Info:  Company Elements count: 0 Elements 
+2026-10-29 20:17:13.065 Info:  
+2026-10-29 20:17:13.065 Info: *** Qt screens *** 
+2026-10-29 20:17:13.065 Info: "( 1 : 1023 x 767 )" 
+2026-10-29 20:17:13.065 Info:  
+2026-10-29 20:17:13.066 Info: DISK : C:/   
+2026-10-29 20:17:13.066 Info: FileSystemType: "NTFS" 
+2026-10-29 20:17:13.066 Info: SizeTotal: 160 GB 
+2026-10-29 20:17:13.066 Info: AvailableSize: 29 GB 
+2026-10-29 20:17:13.066 Info: DISK : D:/   
+2026-10-29 20:17:13.066 Info: FileSystemType: "NTFS" 
+2026-10-29 20:17:13.066 Info: SizeTotal: 236 GB 
+2026-10-29 20:17:13.066 Info: AvailableSize: 235 GB 
+2026-10-29 20:17:13.066 Info: DISK USED: D:/   
+2026-10-29 20:17:13.066 Info: FileSystemType: "NTFS" 
+2026-10-29 20:17:13.066 Info: SizeTotal: 236 GB 
+2026-10-29 20:17:13.066 Info: AvailableSize: 235 GB 
+2026-10-29 20:17:13.066 Info: Count All Elements in collections = 8839 Elements 
+2026-10-29 20:17:18.519 Warning: QObject::disconnect: wildcard call disconnects from destroyed signal of AutoNumberingDockWidget::AutoNumberingDockWidget (:0, )
