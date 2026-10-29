@@ -71,6 +71,8 @@ class tst_qeticons : public QObject
 		void coloredIconKeepsItsColorsOnHover();
 		void menuIconReadsOnHighlight_data();
 		void menuIconReadsOnHighlight();
+		void windowsMenuBarLabels_data();
+		void windowsMenuBarLabels();
 		void panelProjectIconStaysSmall();
 		void configPageIconsComeAtPageSize();
 };
@@ -689,6 +691,95 @@ void tst_qeticons::menuIconReadsOnHighlight()
 	const double contrast = QET::Test::inkContrast(image, icon_column);
 	QVERIFY2(contrast >= kIconRatio,
 	         qPrintable(QString("highlighted menu icon: %1").arg(contrast)));
+}
+
+namespace {
+	// A theme backend that provides layout metrics but loses menu labels.
+	// The Windows menu bar must not depend on that backend painting its text.
+	class BlankMenuBackend : public QProxyStyle {
+	public:
+		BlankMenuBackend() : QProxyStyle(QStyleFactory::create("Fusion")) {}
+		void drawControl(ControlElement element, const QStyleOption *option,
+		                 QPainter *painter, const QWidget *widget = nullptr) const override {
+			if (element == CE_MenuBarItem || element == CE_MenuBarEmptyArea) {
+				painter->fillRect(option->rect, Qt::white);
+				return;
+			}
+			QProxyStyle::drawControl(element, option, painter, widget);
+		}
+	};
+}
+
+void tst_qeticons::windowsMenuBarLabels_data()
+{
+	QTest::addColumn<QString>("base");
+	QTest::addColumn<QPalette>("palette");
+	QTest::addColumn<bool>("selected");
+	QTest::addColumn<bool>("active");
+	QStringList styles = QStyleFactory::keys();
+	styles << "blank-menu-backend";
+	for (const auto &base : styles) {
+		for (const auto &mode : {QString("light"), QString("dark"), QString("stale-palette")}) {
+			QPalette palette = mode == "light" ? QET::Palette::fusionLight() : QET::Palette::fusionDark();
+			if (mode == "stale-palette") {
+				palette.setColor(QPalette::WindowText, palette.color(QPalette::Window));
+				palette.setColor(QPalette::HighlightedText, palette.color(QPalette::Highlight));
+			}
+			for (bool selected : {false, true}) {
+				for (bool active : {false, true}) {
+					const QString name = base + '-' + mode + (selected ? "-selected" : "-normal")
+					                     + (active ? "-active" : "-inactive");
+					QTest::newRow(qPrintable(name)) << base << palette << selected << active;
+				}
+			}
+		}
+	}
+}
+
+void tst_qeticons::windowsMenuBarLabels()
+{
+#ifndef Q_OS_WIN
+	QSKIP("Windows menu rendering fallback; other platforms keep their native style");
+#else
+	QFETCH(QString, base);
+	QFETCH(QPalette, palette);
+	QFETCH(bool, selected);
+	QFETCH(bool, active);
+	QETStyle style(base == "blank-menu-backend" ? static_cast<QStyle *>(new BlankMenuBackend)
+	                                           : QStyleFactory::create(base));
+	QStyleOptionMenuItem option;
+	option.palette = palette;
+	option.palette.setCurrentColorGroup(active ? QPalette::Active : QPalette::Inactive);
+	option.state = QStyle::State_Enabled;
+	if (active) option.state |= QStyle::State_Active;
+	if (selected) option.state |= QStyle::State_Selected | QStyle::State_Sunken;
+	option.rect = QRect(0, 0, 200, 32);
+	option.font = QApplication::font("QMenuBar");
+	option.menuItemType = QStyleOptionMenuItem::Normal;
+	const auto render = [&](const QString &text) {
+		QImage image(250, 40, QImage::Format_ARGB32_Premultiplied);
+		image.setDevicePixelRatio(1.25);
+		image.fill(Qt::magenta);
+		QPainter painter(&image);
+		option.text = text;
+		style.drawControl(QStyle::CE_MenuBarItem, &option, &painter);
+		return image;
+	};
+	const QImage blank = render(QString());
+	const QImage label = render(QStringLiteral("&Arquivo — Edição"));
+	QET::Test::dump(label, "windows-menu-125-percent");
+	int readable_text_pixels = 0;
+	for (int y = 0; y < label.height(); ++y) {
+		for (int x = 0; x < label.width(); ++x) {
+			if (label.pixel(x, y) != blank.pixel(x, y)
+			    && QET::Palette::contrastRatio(label.pixelColor(x, y), blank.pixelColor(x, y)) >= 4.5)
+				++readable_text_pixels;
+		}
+	}
+	QVERIFY2(readable_text_pixels >= 30, "Menu label is blank, clipped or has insufficient contrast at 125%");
+	const auto face = palette.color(selected ? QPalette::Highlight : QPalette::Window);
+	QCOMPARE(blank.pixelColor(0, 0), face);
+#endif
 }
 
 /**

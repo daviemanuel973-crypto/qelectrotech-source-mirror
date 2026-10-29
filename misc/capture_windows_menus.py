@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Capture the shipped Windows editor and its menus on an interactive desktop."""
 import argparse
+from collections import Counter
 import ctypes
 from ctypes import wintypes
 import json
 import os
+import platform
 from pathlib import Path
 import shutil
 import subprocess
@@ -13,6 +15,37 @@ import time
 
 from PIL import ImageGrab
 from pywinauto import Desktop
+
+
+def contrast(a, b):
+    def luminance(rgb):
+        def linear(c):
+            c /= 255
+            return c / 12.92 if c <= .04045 else ((c + .055) / 1.055) ** 2.4
+        return sum(w * linear(c) for w, c in zip((.2126, .7152, .0722), rgb))
+    a, b = sorted((luminance(a), luminance(b)))
+    return (b + .05) / (a + .05)
+
+
+def verify_labels(screen, menus):
+    """Measure the actual desktop pixels inside the accessible menu cells."""
+    result = []
+    for menu in menus:
+        rect = menu.rectangle()
+        crop = screen.crop((max(0, rect.left + 4), max(0, rect.top + 4),
+                            min(screen.width, rect.right - 4), min(screen.height, rect.bottom - 4))).convert('RGB')
+        colors = Counter(crop.getdata())
+        if not colors:
+            raise RuntimeError('Empty visible menu cell: ' + menu.window_text())
+        background = colors.most_common(1)[0][0]
+        readable = sum(count for color, count in colors.items() if contrast(color, background) >= 4.5)
+        if readable < 10:
+            raise RuntimeError('Blank or unreadable Windows menu title: ' + menu.window_text())
+        result.append({'title': menu.window_text(), 'readable_pixels': readable,
+                       'rect': [rect.left, rect.top, rect.right, rect.bottom]})
+    if len(result) < 4:
+        raise RuntimeError('The editor did not expose at least four visible menu titles')
+    return result
 
 
 def process_windows(pid):
@@ -96,29 +129,46 @@ def capture(root, output, style, language, scale):
                     ImageGrab.grab(bbox=(rect.left, rect.top, rect.right, rect.bottom),
                                    all_screens=True).save(output / (name + '.png'))
                 screenshot('01-menubar')
-                try:
-                    uia = Desktop(backend='uia').window(handle=window.handle)
-                    (output / 'uia-tree.txt').write_text(
-                        '\n'.join(str(c.element_info) + ' ' + str(c.rectangle())
-                                  for c in uia.descendants()), encoding='utf-8')
-                except Exception as error:
-                    (output / 'uia-tree.txt').write_text(str(error), encoding='utf-8')
+                uia = Desktop(backend='uia').window(handle=window.handle)
+                descendants = uia.descendants()
+                (output / 'uia-tree.txt').write_text(
+                    '\n'.join(str(c.element_info) + ' ' + str(c.rectangle())
+                              for c in descendants), encoding='utf-8')
+                bars = [c for c in descendants if c.element_info.class_name == 'QMenuBar']
+                if len(bars) != 1:
+                    raise RuntimeError('Expected one actual QET menu bar')
+                menus = [c for c in bars[0].children() if c.window_text() and c.is_enabled()
+                         and c.rectangle().width() > 8 and c.rectangle().height() > 8]
+                labels = verify_labels(ImageGrab.grab(all_screens=True), menus)
+                def popup_windows():
+                    return [c for c in process_windows(process.pid) if 'Popup' in c.class_name()]
                 window.type_keys('{VK_MENU}{DOWN}')
                 time.sleep(1)
                 screenshot('02-keyboard-menu')
+                keyboard_popups = len(popup_windows())
+                if not keyboard_popups:
+                    raise RuntimeError('Alt followed by Down did not open a Windows menu')
                 window.type_keys('{ESC}{ESC}')
                 # The menu row starts just below the native title bar. Record
                 # both client and window geometry to make the click auditable.
                 point = wintypes.POINT(0, 0)
                 ctypes.windll.user32.ClientToScreen.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.POINT)]
                 ctypes.windll.user32.ClientToScreen(window.handle, ctypes.byref(point))
-                window.click_input(coords=(point.x - rect.left + 25, point.y - rect.top + 12))
+                first = menus[0].rectangle()
+                window.click_input(coords=((first.left + first.right) // 2 - rect.left,
+                                           (first.top + first.bottom) // 2 - rect.top))
                 time.sleep(1)
                 screenshot('03-mouse-menu')
+                mouse_popups = len(popup_windows())
+                if not mouse_popups:
+                    raise RuntimeError('Clicking the visible first title did not open a Windows menu')
                 window.type_keys('{ESC}{ESC}')
                 details = {
                     'platform': 'Windows', 'style_override': style or 'default',
                     'qt_scale_factor': scale,
+                    'os_version': platform.platform(),
+                    'menu_labels': labels, 'keyboard_popup_windows': keyboard_popups,
+                    'mouse_popup_windows': mouse_popups,
                     'language': language, 'window_title': window.window_text(),
                     'window_rect': [rect.left, rect.top, rect.right, rect.bottom],
                     'client_origin': [point.x, point.y],
@@ -146,3 +196,9 @@ if __name__ == '__main__':
     for style, language in [('', 'en'), ('Fusion', 'en'), ('', 'pt_BR')]:
         capture(args.package.resolve(), args.output / ((style or 'default') + '-' + language),
                 style, language, args.scale)
+    info_path = args.package / 'validation' / 'build-info.json'
+    if info_path.exists():
+        info = json.loads(info_path.read_text(encoding='utf-8'))
+        info['packaged_windows_menu_render_and_input'] = 'passed'
+        info['menu_validation_scale_factor'] = args.scale
+        info_path.write_text(json.dumps(info, indent=2), encoding='utf-8')

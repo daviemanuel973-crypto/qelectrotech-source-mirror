@@ -113,6 +113,38 @@ jobs:
           test -s "$GITHUB_WORKSPACE/build/industrial-validation/results.txt"
           grep -q 'PASS QET native integration' "$GITHUB_WORKSPACE/build/industrial-validation/results.txt"
 
+      - name: Verify that the menu regression test detects the delivered renderer
+        shell: msys2 {0}
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          set -euo pipefail
+          # Rebuild only the icon/style test with the delivered implementation.
+          # The packaged application remains the current build throughout.
+          cp sources/qetstyle.cpp build/qetstyle-current.cpp
+          cp sources/qetstyle.h build/qetstyle-current.h
+          restore_menu_style() {
+            cp build/qetstyle-current.cpp sources/qetstyle.cpp
+            cp build/qetstyle-current.h sources/qetstyle.h
+          }
+          trap restore_menu_style EXIT
+          git fetch --depth=1 origin 170973ca60cb52ac0caac3db36593f4d164fcdd6
+          git show 170973ca60cb52ac0caac3db36593f4d164fcdd6:sources/qetstyle.cpp > sources/qetstyle.cpp
+          git show 170973ca60cb52ac0caac3db36593f4d164fcdd6:sources/qetstyle.h > sources/qetstyle.h
+          cmake --build build --target tst_qeticons --parallel 4
+          set +e
+          build/tests/qttest/tst_qeticons.exe windowsMenuBarLabels:blank-menu-backend-dark-normal-active -o build/menu-before.txt,txt
+          before_status=$?
+          set -e
+          cat build/menu-before.txt
+          test "$before_status" -ne 0
+          grep -q 'Menu label is blank, clipped or has insufficient contrast' build/menu-before.txt
+          restore_menu_style
+          trap - EXIT
+          cmake --build build --target tst_qeticons --parallel 4
+          build/tests/qttest/tst_qeticons.exe windowsMenuBarLabels -o build/menu-after.txt,txt
+          cat build/menu-after.txt
+
       - name: Rodar testes automatizados disponiveis
         id: testes
         shell: msys2 {0}
@@ -201,14 +233,41 @@ jobs:
           /ucrt64/bin/python.exe misc/verify_windows_portable.py "$DEST"
           echo 'Pacote preparado e inicialização isolada verificada.'
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Validate visible menu titles and mouse and keyboard input on Windows
+        id: menus
+        shell: pwsh
+        run: |
+          python -m pip install pillow==11.3.0 pywinauto==0.6.9
+          $theme = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize'
+          New-Item -Path $theme -Force | Out-Null
+          Set-ItemProperty -Path $theme -Name AppsUseLightTheme -Type DWord -Value 0
+          Set-ItemProperty -Path $theme -Name SystemUsesLightTheme -Type DWord -Value 0
+          python misc/capture_windows_menus.py QET-ForcaComando-Portatil QET-ForcaComando-Portatil/validation/windows-menus
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Disponibilizar download do aplicativo Windows
-        if: ${{ always() && steps.pacote.outcome == 'success' }}
+        if: ${{ success() && steps.pacote.outcome == 'success' && steps.menus.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: QET-WINDOWS-COMPILADO-${{ job.status }}
           path: QET-ForcaComando-Portatil/
           if-no-files-found: error
           retention-days: 30
+
+      - name: Keep menu screenshots and regression logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: QET-Windows-menu-validation
+          path: |
+            QET-ForcaComando-Portatil/validation/windows-menus/
+            build/menu-before.txt
+            build/menu-after.txt
+          if-no-files-found: ignore
 
       - name: Guardar logs se a compilacao falhar
         if: failure()
