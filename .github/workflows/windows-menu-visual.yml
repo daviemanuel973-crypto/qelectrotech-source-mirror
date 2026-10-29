@@ -1,6 +1,10 @@
 name: Windows menu visual capture
 
 on:
+  pull_request:
+    paths:
+      - '.github/workflows/windows-menu-visual.yml'
+      - 'misc/capture_windows_menus.py'
   workflow_dispatch:
     inputs:
       package_run_id:
@@ -26,7 +30,7 @@ jobs:
         with:
           name: QET-WINDOWS-COMPILADO-success
           path: package
-          run-id: ${{ inputs.package_run_id }}
+          run-id: ${{ inputs.package_run_id || '40129192499' }}
           github-token: ${{ github.token }}
       - run: python misc/capture_windows_menus.py package menu-captures
       - uses: actions/upload-artifact@v4
