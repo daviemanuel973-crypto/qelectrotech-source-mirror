@@ -1,3 +1,4 @@
+#include <QBuffer>
 /*
 	Copyright 2006-2026 The QElectroTech Team
 	This file is part of QElectroTech.
@@ -703,7 +704,19 @@ void QetShapeItem::paint(
 		painter -> restore  ();
 	}
 
-	painter->drawPath(outline());
+    if(!m_documentaryVector.isNull()) {
+        const QRectF bounds=m_documentaryVector.boundingRect();
+        const QRectF target=QRectF(m_P1,m_P2).normalized();
+        if(bounds.width()>0. && bounds.height()>0.) {
+            const qreal factor=std::min(target.width()/bounds.width(),target.height()/bounds.height());
+            painter->save();painter->translate(target.center());
+            painter->scale(factor*qreal(m_documentaryVector.logicalDpiX())/painter->device()->logicalDpiX(),
+                           factor*qreal(m_documentaryVector.logicalDpiY())/painter->device()->logicalDpiY());
+            painter->translate(-bounds.center().x()*painter->device()->logicalDpiX()/qreal(m_documentaryVector.logicalDpiX()),
+                               -bounds.center().y()*painter->device()->logicalDpiY()/qreal(m_documentaryVector.logicalDpiY()));
+            QPicture vector=m_documentaryVector;vector.play(painter);painter->restore();
+        }
+    } else painter->drawPath(outline());
 
 	// Segment midpoint markers: a small, distinct diamond at the middle
 	// of every segment -- straight or already curved -- shown only in
@@ -3045,6 +3058,13 @@ void QetShapeItem::handlerMouseReleaseEvent(int handlerIndex)
 bool QetShapeItem::fromXml(const QDomElement &e)
 {
 	if (e.tagName() != "shape") return (false);
+    m_documentaryVector=QPicture();
+    const QByteArray encoded=e.firstChildElement(QStringLiteral("qet_symbol_vector")).text().toLatin1();
+    if(!encoded.isEmpty()) {
+        QByteArray data=QByteArray::fromBase64(encoded);QBuffer buffer(&data);
+        buffer.open(QIODevice::ReadOnly);m_documentaryVector.load(&buffer);
+    }
+
 
 		//Absent in files written before shapes carried a uuid: keep the
 		//one this item already has, Diagram::fromXml() settles it.
@@ -3176,6 +3196,16 @@ bool QetShapeItem::fromXml(const QDomElement &e)
 QDomElement QetShapeItem::toXml(QDomDocument &document) const
 {
 	QDomElement result = document.createElement("shape");
+    if(!m_documentaryVector.isNull()) {
+        QByteArray data;QBuffer buffer(&data);buffer.open(QIODevice::WriteOnly);
+        QPicture vector=m_documentaryVector;
+        if(vector.save(&buffer)) {
+            auto node=document.createElement(QStringLiteral("qet_symbol_vector"));
+            node.appendChild(document.createTextNode(QString::fromLatin1(data.toBase64())));
+            result.appendChild(node);
+        }
+    }
+
 	result.setAttribute("uuid", m_uuid.toString());
 
 		//write some attribute
