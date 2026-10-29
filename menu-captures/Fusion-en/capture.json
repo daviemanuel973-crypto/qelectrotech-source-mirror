@@ -1,0 +1,123 @@
+{
+  "platform": "Windows",
+  "style_override": "Fusion",
+  "qt_scale_factor": "1.25",
+  "os_version": "Windows-2025Server-10.0.26100-SP0",
+  "menu_labels": [
+    {
+      "title": "File",
+      "readable_pixels": 71,
+      "rect": [
+        7,
+        22,
+        39,
+        48
+      ]
+    },
+    {
+      "title": "Edit",
+      "readable_pixels": 103,
+      "rect": [
+        47,
+        22,
+        83,
+        48
+      ]
+    },
+    {
+      "title": "Project",
+      "readable_pixels": 144,
+      "rect": [
+        91,
+        22,
+        147,
+        48
+      ]
+    },
+    {
+      "title": "Numbering",
+      "readable_pixels": 255,
+      "rect": [
+        155,
+        22,
+        241,
+        48
+      ]
+    },
+    {
+      "title": "Lists",
+      "readable_pixels": 89,
+      "rect": [
+        248,
+        22,
+        286,
+        48
+      ]
+    },
+    {
+      "title": "Display",
+      "readable_pixels": 165,
+      "rect": [
+        295,
+        22,
+        353,
+        48
+      ]
+    },
+    {
+      "title": "Settings",
+      "readable_pixels": 194,
+      "rect": [
+        361,
+        22,
+        424,
+        48
+      ]
+    },
+    {
+      "title": "Windows",
+      "readable_pixels": 225,
+      "rect": [
+        432,
+        22,
+        503,
+        48
+      ]
+    },
+    {
+      "title": "Help",
+      "readable_pixels": 113,
+      "rect": [
+        511,
+        22,
+        552,
+        48
+      ]
+    },
+    {
+      "title": "Industrial",
+      "readable_pixels": 209,
+      "rect": [
+        560,
+        22,
+        632,
+        48
+      ]
+    }
+  ],
+  "keyboard_popup_windows": 1,
+  "mouse_popup_windows": 1,
+  "language": "en",
+  "window_title": "Project \u00ab Operational amplifier uA741 : C:/Users/RUNNER~1/AppData/Local/Temp/qet menu visual pq45f7tr/menus.qet\u00bb - QElectroTech",
+  "window_rect": [
+    -8,
+    -8,
+    1032,
+    728
+  ],
+  "client_origin": [
+    0,
+    23
+  ],
+  "package_source_commit": "170973ca60cb52ac0caac3db36593f4d164fcdd6"
+}
