@@ -88,17 +88,22 @@ def capture(root, output, style, language, scale):
                 time.sleep(1)
                 screenshot('03-mouse-menu')
                 window.type_keys('{ESC}{ESC}')
-                (output / 'capture.json').write_text(json.dumps({
+                details = {
                     'platform': 'Windows', 'style_override': style or 'default',
                     'qt_scale_factor': scale,
                     'language': language, 'window_title': window.window_text(),
                     'window_rect': [rect.left, rect.top, rect.right, rect.bottom],
                     'client_origin': [point.x, point.y],
                     'package_source_commit': (root / 'validation/source-commit.txt').read_text().strip(),
-                }, indent=2), encoding='utf-8')
+                }
+                print(json.dumps(details), flush=True)
+                (output / 'capture.json').write_text(json.dumps(details, indent=2), encoding='utf-8')
                 window.close()
-                process.wait(timeout=45)
-                if process.returncode:
+                try:
+                    process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    print('Capture complete; editor did not exit after close', flush=True)
+                if process.returncode not in (None, 0):
                     raise RuntimeError('Packaged editor crashed on close')
             finally:
                 if process.poll() is None:
