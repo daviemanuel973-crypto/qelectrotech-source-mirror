@@ -128,21 +128,21 @@ jobs:
             cp build/qetstyle-current.h sources/qetstyle.h
           }
           trap restore_menu_style EXIT
-          git fetch --depth=1 origin 170973ca60cb52ac0caac3db36593f4d164fcdd6
-          git show 170973ca60cb52ac0caac3db36593f4d164fcdd6:sources/qetstyle.cpp > sources/qetstyle.cpp
-          git show 170973ca60cb52ac0caac3db36593f4d164fcdd6:sources/qetstyle.h > sources/qetstyle.h
+          git fetch --depth=1 origin 8348877dccd8d2fb2b282f5a16781276ed6ea104
+          git show 8348877dccd8d2fb2b282f5a16781276ed6ea104:sources/qetstyle.cpp > sources/qetstyle.cpp
+          git show 8348877dccd8d2fb2b282f5a16781276ed6ea104:sources/qetstyle.h > sources/qetstyle.h
           cmake --build build --target tst_qeticons --parallel 4
           set +e
-          build/tests/qttest/tst_qeticons.exe windowsMenuBarLabels:blank-menu-backend-dark-normal-active -o build/menu-before.txt,txt
+          build/tests/qttest/tst_qeticons.exe windowsPopupLabels:blank-menu-backend-light-shortcut-normal -o build/menu-before.txt,txt
           before_status=$?
           set -e
           cat build/menu-before.txt
           test "$before_status" -ne 0
-          grep -q 'Menu label is blank, clipped or has insufficient contrast' build/menu-before.txt
+          grep -q 'Popup item label is blank or unreadable' build/menu-before.txt
           restore_menu_style
           trap - EXIT
           cmake --build build --target tst_qeticons --parallel 4
-          build/tests/qttest/tst_qeticons.exe windowsMenuBarLabels -o build/menu-after.txt,txt
+          build/tests/qttest/tst_qeticons.exe windowsMenuBarLabels windowsPopupLabels -o build/menu-after.txt,txt
           cat build/menu-after.txt
 
       - name: Rodar testes automatizados disponiveis
@@ -237,7 +237,7 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Validate visible menu titles and mouse and keyboard input on Windows
+      - name: Validate menu titles, popup labels and mouse and keyboard input on Windows
         id: menus
         shell: pwsh
         run: |

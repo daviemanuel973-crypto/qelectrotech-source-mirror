@@ -61,6 +61,12 @@ class QETStyle : public QProxyStyle
 		                   const QStyleOption *option,
 		                   QPainter *painter,
 		                   const QWidget *widget = nullptr) const override;
+		QSize sizeFromContents(ContentsType type, const QStyleOption *option,
+		                       const QSize &size, const QWidget *widget = nullptr) const override;
+		int pixelMetric(PixelMetric metric, const QStyleOption *option = nullptr,
+		                const QWidget *widget = nullptr) const override;
+		int styleHint(StyleHint hint, const QStyleOption *option = nullptr,
+		              const QWidget *widget = nullptr, QStyleHintReturn *result = nullptr) const override;
 
 		/// True when fewer than a fifth of the visible pixels are saturated.
 		static bool isLineArt(const QImage &image);
@@ -72,6 +78,9 @@ class QETStyle : public QProxyStyle
 	private:
 		QIcon menuIcon(const QIcon &icon, const QPalette &palette, int size, qreal dpr) const;
 		mutable QHash<QString, QIcon> menu_icons_;
+#ifdef Q_OS_WIN
+		QStyle *menu_style_ = nullptr; ///< Owned QObject child; independent of the Windows theme.
+#endif
 };
 
 #endif

@@ -19,12 +19,59 @@
 
 #include <QApplication>
 #include <QImage>
+#include <QMenu>
 #include <QPainter>
 #include <QPixmap>
 #include <QStyleOption>
+#include <QStyleFactory>
 #include <QWidget>
 
 #include "qetpalette.h"
+
+#ifdef Q_OS_WIN
+namespace {
+	QColor menuInk(QColor ink, const QColor &face, bool disabled)
+	{
+		const qreal alpha = ink.alphaF();
+		ink = QColor(qRound(ink.red() * alpha + face.red() * (1 - alpha)),
+		             qRound(ink.green() * alpha + face.green() * (1 - alpha)),
+		             qRound(ink.blue() * alpha + face.blue() * (1 - alpha)));
+		if (QET::Palette::contrastRatio(ink, face) >= (disabled ? 1.5 : 4.5))
+			return ink;
+		ink = QET::Palette::contrastRatio(Qt::black, face) >= QET::Palette::contrastRatio(Qt::white, face)
+			? QColor(Qt::black) : QColor(Qt::white);
+		if (disabled)
+			ink = QColor(qRound(.55 * ink.red() + .45 * face.red()),
+			             qRound(.55 * ink.green() + .45 * face.green()),
+			             qRound(.55 * ink.blue() + .45 * face.blue()));
+		return ink;
+	}
+
+	QPalette popupPalette(QPalette palette)
+	{
+		// Disabled actions share the popup surface too; a custom light QET
+		// palette may still carry Windows' dark Disabled Window/Base roles.
+		QColor face = palette.color(QPalette::Active, QPalette::Window);
+		face.setAlpha(255);
+		for (auto group : {QPalette::Active, QPalette::Inactive, QPalette::Disabled}) {
+			QColor highlight = palette.color(group, QPalette::Highlight);
+			highlight.setAlpha(255);
+			const bool disabled = group == QPalette::Disabled;
+			const auto ink = menuInk(palette.color(group, QPalette::Text), face, disabled);
+			palette.setColor(group, QPalette::Window, face);
+			palette.setColor(group, QPalette::Base, face);
+			palette.setColor(group, QPalette::Button, face);
+			palette.setColor(group, QPalette::Text, ink);
+			palette.setColor(group, QPalette::WindowText, ink);
+			palette.setColor(group, QPalette::ButtonText, ink);
+			palette.setColor(group, QPalette::Highlight, highlight);
+			palette.setColor(group, QPalette::HighlightedText,
+			                 menuInk(palette.color(group, QPalette::HighlightedText), highlight, disabled));
+		}
+		return palette;
+	}
+}
+#endif
 
 /**
 	@brief QETStyle::QETStyle
@@ -34,6 +81,11 @@ QETStyle::QETStyle(QStyle *base) :
 	QProxyStyle(base)
 {
 	setObjectName(base ? base->objectName() : QString());
+#ifdef Q_OS_WIN
+	menu_style_ = QStyleFactory::create(QStringLiteral("Fusion"));
+	if (menu_style_)
+		menu_style_->setParent(this);
+#endif
 }
 
 /**
@@ -138,9 +190,9 @@ QIcon QETStyle::menuIcon(const QIcon &icon, const QPalette &palette, int size, q
 
 /**
 	@brief QETStyle::drawControl
-	CE_MenuItem with an icon and a highlight: swap the icon for menuIcon()
-	so the base style's QIcon::Active request gets an icon that reads on
-	the highlight bar. Everything else goes to the base style.
+	Windows menus use a palette-driven renderer for text and backgrounds.
+	Highlighted menu icons use menuIcon() so line art reads on the
+	highlight bar. Other controls go to the base style.
 */
 void QETStyle::drawControl(ControlElement element,
                            const QStyleOption *option,
@@ -148,6 +200,32 @@ void QETStyle::drawControl(ControlElement element,
                            const QWidget *widget) const
 {
 #ifdef Q_OS_WIN
+	// A popup can use a light/custom QET palette while Windows is dark.
+	// The native Windows style picks item text from its OS theme rather than
+	// that palette, producing white labels on the light popup. Keep popup
+	// painting AND its metrics on one palette-driven style. This includes
+	// shortcuts, check marks, submenu arrows, separators and selected icons.
+	if (menu_style_ && (element == CE_MenuItem || element == CE_MenuEmptyArea
+	                   || element == CE_MenuScroller || element == CE_MenuTearoff)) {
+		if (const auto *item = qstyleoption_cast<const QStyleOptionMenuItem *>(option)) {
+			QStyleOptionMenuItem copy = *item;
+			copy.palette = popupPalette(item->palette);
+			if (!copy.icon.isNull() && (copy.state & State_Selected) && (copy.state & State_Enabled)) {
+				const int size = menu_style_->pixelMetric(PM_SmallIconSize, &copy, widget);
+				copy.icon = menuIcon(copy.icon, copy.palette, size, widget ? widget->devicePixelRatio() : 1.0);
+			}
+			painter->save();
+			painter->fillRect(copy.rect, copy.palette.brush(QPalette::Window));
+			painter->setFont(copy.font);
+			menu_style_->drawControl(element, &copy, painter, widget);
+			painter->restore();
+		} else {
+			QStyleOption copy = *option;
+			copy.palette = popupPalette(option->palette);
+			menu_style_->drawControl(element, &copy, painter, widget);
+		}
+		return;
+	}
 	// Keep the menu bar's background and text in the same palette. Native
 	// Windows theme painting can disagree with the application's dark/custom
 	// palette; changing the application style alone does not control both
@@ -206,12 +284,49 @@ void QETStyle::drawPrimitive(PrimitiveElement element,
                              const QWidget *widget) const
 {
 #ifdef Q_OS_WIN
+	if (menu_style_ && (element == PE_PanelMenu || element == PE_FrameMenu)) {
+		QStyleOption copy = *option;
+		copy.palette = popupPalette(option->palette);
+		if (element == PE_PanelMenu)
+			painter->fillRect(copy.rect, copy.palette.brush(QPalette::Window));
+		menu_style_->drawPrimitive(PE_FrameMenu, &copy, painter, widget);
+		return;
+	}
 	if (element == PE_PanelMenuBar) {
 		painter->fillRect(option->rect, option->palette.brush(QPalette::Window));
 		return;
 	}
 #endif
 	QProxyStyle::drawPrimitive(element, option, painter, widget);
+}
+
+QSize QETStyle::sizeFromContents(ContentsType type, const QStyleOption *option,
+                                 const QSize &size, const QWidget *widget) const
+{
+#ifdef Q_OS_WIN
+	if (menu_style_ && type == CT_MenuItem)
+		return menu_style_->sizeFromContents(type, option, size, widget);
+#endif
+	return QProxyStyle::sizeFromContents(type, option, size, widget);
+}
+
+int QETStyle::pixelMetric(PixelMetric metric, const QStyleOption *option, const QWidget *widget) const
+{
+#ifdef Q_OS_WIN
+	if (menu_style_ && qobject_cast<const QMenu *>(widget))
+		return menu_style_->pixelMetric(metric, option, widget);
+#endif
+	return QProxyStyle::pixelMetric(metric, option, widget);
+}
+
+int QETStyle::styleHint(StyleHint hint, const QStyleOption *option,
+                        const QWidget *widget, QStyleHintReturn *result) const
+{
+#ifdef Q_OS_WIN
+	if (menu_style_ && qobject_cast<const QMenu *>(widget))
+		return menu_style_->styleHint(hint, option, widget, result);
+#endif
+	return QProxyStyle::styleHint(hint, option, widget, result);
 }
 
 /**
