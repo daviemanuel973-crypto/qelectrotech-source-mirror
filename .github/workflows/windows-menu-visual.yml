@@ -1,10 +1,8 @@
 name: Windows menu visual capture
 
 on:
-  pull_request:
-    paths:
-      - '.github/workflows/windows-menu-visual.yml'
-      - 'misc/capture_windows_menus.py'
+  # Inspect an explicitly selected compiled package. PR builds already run
+  # strict GUI validation before uploading their own Windows artifact.
   workflow_dispatch:
     inputs:
       package_run_id:
