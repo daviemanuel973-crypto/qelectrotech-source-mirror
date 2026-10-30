@@ -1,0 +1,370 @@
+{
+  "platform": "Windows",
+  "style_override": "Fusion",
+  "qt_scale_factor": "1.25",
+  "application_color": "system",
+  "os_version": "Windows-2025Server-10.0.26100-SP0",
+  "menu_labels": [
+    {
+      "title": "File",
+      "readable_pixels": 65,
+      "rect": [
+        7,
+        22,
+        39,
+        48
+      ]
+    },
+    {
+      "title": "Edit",
+      "readable_pixels": 96,
+      "rect": [
+        47,
+        22,
+        83,
+        48
+      ]
+    },
+    {
+      "title": "Project",
+      "readable_pixels": 133,
+      "rect": [
+        91,
+        22,
+        147,
+        48
+      ]
+    },
+    {
+      "title": "Numbering",
+      "readable_pixels": 250,
+      "rect": [
+        155,
+        22,
+        241,
+        48
+      ]
+    },
+    {
+      "title": "Lists",
+      "readable_pixels": 89,
+      "rect": [
+        248,
+        22,
+        286,
+        48
+      ]
+    },
+    {
+      "title": "Display",
+      "readable_pixels": 154,
+      "rect": [
+        295,
+        22,
+        353,
+        48
+      ]
+    },
+    {
+      "title": "Settings",
+      "readable_pixels": 182,
+      "rect": [
+        361,
+        22,
+        424,
+        48
+      ]
+    },
+    {
+      "title": "Windows",
+      "readable_pixels": 216,
+      "rect": [
+        432,
+        22,
+        503,
+        48
+      ]
+    },
+    {
+      "title": "Help",
+      "readable_pixels": 102,
+      "rect": [
+        511,
+        22,
+        552,
+        48
+      ]
+    },
+    {
+      "title": "Industrial",
+      "readable_pixels": 209,
+      "rect": [
+        560,
+        22,
+        632,
+        48
+      ]
+    }
+  ],
+  "keyboard_popup_windows": 1,
+  "mouse_popup_windows": 1,
+  "keyboard_popup_labels": [
+    {
+      "title": "Latest files",
+      "enabled": true,
+      "readable_label_pixels": 57,
+      "label_rect": [
+        47,
+        64,
+        230,
+        88
+      ]
+    },
+    {
+      "title": "New",
+      "enabled": true,
+      "readable_label_pixels": 94,
+      "label_rect": [
+        47,
+        94,
+        230,
+        118
+      ]
+    },
+    {
+      "title": "Open",
+      "enabled": true,
+      "readable_label_pixels": 117,
+      "label_rect": [
+        47,
+        124,
+        230,
+        148
+      ]
+    },
+    {
+      "title": "Save",
+      "enabled": true,
+      "readable_label_pixels": 92,
+      "label_rect": [
+        47,
+        154,
+        230,
+        178
+      ]
+    },
+    {
+      "title": "Save as",
+      "enabled": true,
+      "readable_label_pixels": 133,
+      "label_rect": [
+        47,
+        184,
+        230,
+        208
+      ]
+    },
+    {
+      "title": "Save a copy for an older QElectroTech",
+      "enabled": true,
+      "readable_label_pixels": 525,
+      "label_rect": [
+        47,
+        214,
+        230,
+        238
+      ]
+    },
+    {
+      "title": "Close",
+      "enabled": true,
+      "readable_label_pixels": 108,
+      "label_rect": [
+        47,
+        244,
+        230,
+        268
+      ]
+    },
+    {
+      "title": "Export",
+      "enabled": true,
+      "readable_label_pixels": 134,
+      "label_rect": [
+        47,
+        276,
+        230,
+        300
+      ]
+    },
+    {
+      "title": "Export in pdf",
+      "enabled": true,
+      "readable_label_pixels": 254,
+      "label_rect": [
+        47,
+        306,
+        230,
+        330
+      ]
+    },
+    {
+      "title": "Print",
+      "enabled": true,
+      "readable_label_pixels": 98,
+      "label_rect": [
+        47,
+        336,
+        230,
+        360
+      ]
+    },
+    {
+      "title": "Quit",
+      "enabled": true,
+      "readable_label_pixels": 94,
+      "label_rect": [
+        47,
+        369,
+        230,
+        393
+      ]
+    }
+  ],
+  "mouse_popup_labels": [
+    {
+      "title": "Latest files",
+      "enabled": true,
+      "readable_label_pixels": 221,
+      "label_rect": [
+        47,
+        64,
+        230,
+        88
+      ]
+    },
+    {
+      "title": "New",
+      "enabled": true,
+      "readable_label_pixels": 94,
+      "label_rect": [
+        47,
+        94,
+        230,
+        118
+      ]
+    },
+    {
+      "title": "Open",
+      "enabled": true,
+      "readable_label_pixels": 117,
+      "label_rect": [
+        47,
+        124,
+        230,
+        148
+      ]
+    },
+    {
+      "title": "Save",
+      "enabled": true,
+      "readable_label_pixels": 92,
+      "label_rect": [
+        47,
+        154,
+        230,
+        178
+      ]
+    },
+    {
+      "title": "Save as",
+      "enabled": true,
+      "readable_label_pixels": 133,
+      "label_rect": [
+        47,
+        184,
+        230,
+        208
+      ]
+    },
+    {
+      "title": "Save a copy for an older QElectroTech",
+      "enabled": true,
+      "readable_label_pixels": 525,
+      "label_rect": [
+        47,
+        214,
+        230,
+        238
+      ]
+    },
+    {
+      "title": "Close",
+      "enabled": true,
+      "readable_label_pixels": 108,
+      "label_rect": [
+        47,
+        244,
+        230,
+        268
+      ]
+    },
+    {
+      "title": "Export",
+      "enabled": true,
+      "readable_label_pixels": 134,
+      "label_rect": [
+        47,
+        276,
+        230,
+        300
+      ]
+    },
+    {
+      "title": "Export in pdf",
+      "enabled": true,
+      "readable_label_pixels": 254,
+      "label_rect": [
+        47,
+        306,
+        230,
+        330
+      ]
+    },
+    {
+      "title": "Print",
+      "enabled": true,
+      "readable_label_pixels": 98,
+      "label_rect": [
+        47,
+        336,
+        230,
+        360
+      ]
+    },
+    {
+      "title": "Quit",
+      "enabled": true,
+      "readable_label_pixels": 94,
+      "label_rect": [
+        47,
+        369,
+        230,
+        393
+      ]
+    }
+  ],
+  "language": "en",
+  "window_title": "Project \u00ab Operational amplifier uA741 : C:/Users/RUNNER~1/AppData/Local/Temp/qet menu visual xt_xklrj/menus.qet\u00bb - QElectroTech",
+  "window_rect": [
+    -8,
+    -8,
+    1032,
+    728
+  ],
+  "client_origin": [
+    0,
+    23
+  ],
+  "package_source_commit": "4a5183e2d5592b359c7434adae9aa38eea4f6ba9"
+}

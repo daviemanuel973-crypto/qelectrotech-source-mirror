@@ -1,0 +1,370 @@
+{
+  "platform": "Windows",
+  "style_override": "Fusion",
+  "qt_scale_factor": "1.25",
+  "application_color": "#ffffff",
+  "os_version": "Windows-2025Server-10.0.26100-SP0",
+  "menu_labels": [
+    {
+      "title": "Arquivo",
+      "readable_pixels": 120,
+      "rect": [
+        7,
+        22,
+        69,
+        48
+      ]
+    },
+    {
+      "title": "Editar",
+      "readable_pixels": 101,
+      "rect": [
+        77,
+        22,
+        125,
+        48
+      ]
+    },
+    {
+      "title": "Projeto",
+      "readable_pixels": 119,
+      "rect": [
+        133,
+        22,
+        191,
+        48
+      ]
+    },
+    {
+      "title": "Numera\u00e7\u00e3o",
+      "readable_pixels": 187,
+      "rect": [
+        200,
+        22,
+        287,
+        48
+      ]
+    },
+    {
+      "title": "Listas",
+      "readable_pixels": 80,
+      "rect": [
+        295,
+        22,
+        341,
+        48
+      ]
+    },
+    {
+      "title": "Exibir",
+      "readable_pixels": 83,
+      "rect": [
+        348,
+        22,
+        394,
+        48
+      ]
+    },
+    {
+      "title": "Configura\u00e7\u00e3o",
+      "readable_pixels": 209,
+      "rect": [
+        402,
+        22,
+        500,
+        48
+      ]
+    },
+    {
+      "title": "Janelas",
+      "readable_pixels": 115,
+      "rect": [
+        508,
+        22,
+        565,
+        48
+      ]
+    },
+    {
+      "title": "Ajuda",
+      "readable_pixels": 90,
+      "rect": [
+        573,
+        22,
+        621,
+        48
+      ]
+    },
+    {
+      "title": "Industrial",
+      "readable_pixels": 141,
+      "rect": [
+        630,
+        22,
+        702,
+        48
+      ]
+    }
+  ],
+  "keyboard_popup_windows": 1,
+  "mouse_popup_windows": 1,
+  "keyboard_popup_labels": [
+    {
+      "title": "Abertos recentemente",
+      "enabled": true,
+      "readable_label_pixels": 312,
+      "label_rect": [
+        47,
+        64,
+        281,
+        88
+      ]
+    },
+    {
+      "title": "Novo",
+      "enabled": true,
+      "readable_label_pixels": 78,
+      "label_rect": [
+        47,
+        94,
+        281,
+        118
+      ]
+    },
+    {
+      "title": "Abrir",
+      "enabled": true,
+      "readable_label_pixels": 72,
+      "label_rect": [
+        47,
+        124,
+        281,
+        148
+      ]
+    },
+    {
+      "title": "Salvar",
+      "enabled": true,
+      "readable_label_pixels": 92,
+      "label_rect": [
+        47,
+        154,
+        281,
+        178
+      ]
+    },
+    {
+      "title": "Salvar como",
+      "enabled": true,
+      "readable_label_pixels": 171,
+      "label_rect": [
+        47,
+        184,
+        281,
+        208
+      ]
+    },
+    {
+      "title": "Salvar uma c\u00f3pia para um QElectroTech mais antigo",
+      "enabled": true,
+      "readable_label_pixels": 507,
+      "label_rect": [
+        47,
+        214,
+        281,
+        238
+      ]
+    },
+    {
+      "title": "Fechar",
+      "enabled": true,
+      "readable_label_pixels": 89,
+      "label_rect": [
+        47,
+        244,
+        281,
+        268
+      ]
+    },
+    {
+      "title": "Exportar",
+      "enabled": true,
+      "readable_label_pixels": 129,
+      "label_rect": [
+        47,
+        276,
+        281,
+        300
+      ]
+    },
+    {
+      "title": "Exportar em pdf",
+      "enabled": true,
+      "readable_label_pixels": 231,
+      "label_rect": [
+        47,
+        306,
+        281,
+        330
+      ]
+    },
+    {
+      "title": "Imprimir",
+      "enabled": true,
+      "readable_label_pixels": 121,
+      "label_rect": [
+        47,
+        336,
+        281,
+        360
+      ]
+    },
+    {
+      "title": "Sair",
+      "enabled": true,
+      "readable_label_pixels": 52,
+      "label_rect": [
+        47,
+        369,
+        281,
+        393
+      ]
+    }
+  ],
+  "mouse_popup_labels": [
+    {
+      "title": "Abertos recentemente",
+      "enabled": true,
+      "readable_label_pixels": 345,
+      "label_rect": [
+        47,
+        64,
+        281,
+        88
+      ]
+    },
+    {
+      "title": "Novo",
+      "enabled": true,
+      "readable_label_pixels": 78,
+      "label_rect": [
+        47,
+        94,
+        281,
+        118
+      ]
+    },
+    {
+      "title": "Abrir",
+      "enabled": true,
+      "readable_label_pixels": 72,
+      "label_rect": [
+        47,
+        124,
+        281,
+        148
+      ]
+    },
+    {
+      "title": "Salvar",
+      "enabled": true,
+      "readable_label_pixels": 92,
+      "label_rect": [
+        47,
+        154,
+        281,
+        178
+      ]
+    },
+    {
+      "title": "Salvar como",
+      "enabled": true,
+      "readable_label_pixels": 171,
+      "label_rect": [
+        47,
+        184,
+        281,
+        208
+      ]
+    },
+    {
+      "title": "Salvar uma c\u00f3pia para um QElectroTech mais antigo",
+      "enabled": true,
+      "readable_label_pixels": 507,
+      "label_rect": [
+        47,
+        214,
+        281,
+        238
+      ]
+    },
+    {
+      "title": "Fechar",
+      "enabled": true,
+      "readable_label_pixels": 89,
+      "label_rect": [
+        47,
+        244,
+        281,
+        268
+      ]
+    },
+    {
+      "title": "Exportar",
+      "enabled": true,
+      "readable_label_pixels": 129,
+      "label_rect": [
+        47,
+        276,
+        281,
+        300
+      ]
+    },
+    {
+      "title": "Exportar em pdf",
+      "enabled": true,
+      "readable_label_pixels": 231,
+      "label_rect": [
+        47,
+        306,
+        281,
+        330
+      ]
+    },
+    {
+      "title": "Imprimir",
+      "enabled": true,
+      "readable_label_pixels": 121,
+      "label_rect": [
+        47,
+        336,
+        281,
+        360
+      ]
+    },
+    {
+      "title": "Sair",
+      "enabled": true,
+      "readable_label_pixels": 52,
+      "label_rect": [
+        47,
+        369,
+        281,
+        393
+      ]
+    }
+  ],
+  "language": "pt_BR",
+  "window_title": "Projeto \u00ab Operational amplifier uA741 : C:/Users/RUNNER~1/AppData/Local/Temp/qet menu visual djcp_b3y/menus.qet\u00bb - QElectroTech",
+  "window_rect": [
+    -8,
+    -8,
+    1032,
+    728
+  ],
+  "client_origin": [
+    0,
+    23
+  ],
+  "package_source_commit": "4a5183e2d5592b359c7434adae9aa38eea4f6ba9"
+}

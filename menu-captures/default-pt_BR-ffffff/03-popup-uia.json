@@ -1,0 +1,123 @@
+[
+  {
+    "title": "Abertos recentemente",
+    "enabled": true,
+    "readable_label_pixels": 342,
+    "label_rect": [
+      40,
+      78,
+      274,
+      102
+    ]
+  },
+  {
+    "title": "Novo",
+    "enabled": true,
+    "readable_label_pixels": 76,
+    "label_rect": [
+      40,
+      108,
+      274,
+      132
+    ]
+  },
+  {
+    "title": "Abrir",
+    "enabled": true,
+    "readable_label_pixels": 68,
+    "label_rect": [
+      40,
+      138,
+      274,
+      162
+    ]
+  },
+  {
+    "title": "Salvar",
+    "enabled": true,
+    "readable_label_pixels": 88,
+    "label_rect": [
+      40,
+      168,
+      274,
+      192
+    ]
+  },
+  {
+    "title": "Salvar como",
+    "enabled": true,
+    "readable_label_pixels": 168,
+    "label_rect": [
+      40,
+      198,
+      274,
+      222
+    ]
+  },
+  {
+    "title": "Salvar uma c\u00f3pia para um QElectroTech mais antigo",
+    "enabled": true,
+    "readable_label_pixels": 505,
+    "label_rect": [
+      40,
+      228,
+      274,
+      252
+    ]
+  },
+  {
+    "title": "Fechar",
+    "enabled": true,
+    "readable_label_pixels": 86,
+    "label_rect": [
+      40,
+      258,
+      274,
+      282
+    ]
+  },
+  {
+    "title": "Exportar",
+    "enabled": true,
+    "readable_label_pixels": 126,
+    "label_rect": [
+      40,
+      290,
+      274,
+      314
+    ]
+  },
+  {
+    "title": "Exportar em pdf",
+    "enabled": true,
+    "readable_label_pixels": 228,
+    "label_rect": [
+      40,
+      320,
+      274,
+      344
+    ]
+  },
+  {
+    "title": "Imprimir",
+    "enabled": true,
+    "readable_label_pixels": 121,
+    "label_rect": [
+      40,
+      350,
+      274,
+      374
+    ]
+  },
+  {
+    "title": "Sair",
+    "enabled": true,
+    "readable_label_pixels": 49,
+    "label_rect": [
+      40,
+      383,
+      274,
+      407
+    ]
+  }
+]
