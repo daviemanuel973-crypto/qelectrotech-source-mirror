@@ -95,6 +95,7 @@ class ConductorProperties
 		m_tension_protocol,
 		m_wire_color,
 		m_wire_section,
+		m_sizing_data, // Versioned preliminary-calculation record, independent of the visible label.
 		m_formula,
 		m_bus,
 		m_cable;

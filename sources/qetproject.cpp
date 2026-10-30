@@ -49,6 +49,7 @@
 #include "qetversion.h"
 #include "undocommand/adddiagramcommand.h"
 #include "utils/previousversions.h"
+#include "automation/industrialdocumentation.h"
 
 #include <QCryptographicHash>
 #include <QElapsedTimer>
@@ -2895,6 +2896,14 @@ QETResult QETProject::write(bool overwrite_changed)
 							 "and saving would overwrite that. Save to another name, or "
 							 "set QET_OVERWRITE_CHANGED=1 to overwrite it.")
 						  .arg(QLocale::system().toString(when, QLocale::ShortFormat))));
+	}
+
+	if (m_modified || m_undo_stack->index() != m_stamped_undo_index) {
+		const bool sizing_changed = ProjectCircuitSizing::refreshBeforeSave(this);
+		if (sizing_changed && IndustrialDocumentation::hasTechnicalSheets(this))
+			IndustrialDocumentation::createSheets(this);
+		else
+			IndustrialDocumentation::refreshListsBeforeSave(this);
 	}
 
 		//The file as it was goes among its previous versions first

@@ -71,6 +71,10 @@ class tst_qeticons : public QObject
 		void coloredIconKeepsItsColorsOnHover();
 		void menuIconReadsOnHighlight_data();
 		void menuIconReadsOnHighlight();
+		void windowsMenuBarLabels_data();
+		void windowsMenuBarLabels();
+		void windowsPopupLabels_data();
+		void windowsPopupLabels();
 		void panelProjectIconStaysSmall();
 		void configPageIconsComeAtPageSize();
 };
@@ -689,6 +693,215 @@ void tst_qeticons::menuIconReadsOnHighlight()
 	const double contrast = QET::Test::inkContrast(image, icon_column);
 	QVERIFY2(contrast >= kIconRatio,
 	         qPrintable(QString("highlighted menu icon: %1").arg(contrast)));
+}
+
+namespace {
+	// A theme backend that provides layout metrics but loses menu labels.
+	// The Windows menu bar must not depend on that backend painting its text.
+	class BlankMenuBackend : public QProxyStyle {
+	public:
+		BlankMenuBackend() : QProxyStyle(QStyleFactory::create("Fusion")) {}
+		void drawControl(ControlElement element, const QStyleOption *option,
+		                 QPainter *painter, const QWidget *widget = nullptr) const override {
+			if (element == CE_MenuBarItem || element == CE_MenuBarEmptyArea || element == CE_MenuItem) {
+				painter->fillRect(option->rect, Qt::white);
+				if (const auto *item = qstyleoption_cast<const QStyleOptionMenuItem *>(option))
+					item->icon.paint(painter, QRect(option->rect.topLeft() + QPoint(6, 6), QSize(16, 16)));
+				return;
+			}
+			QProxyStyle::drawControl(element, option, painter, widget);
+		}
+	};
+}
+
+void tst_qeticons::windowsMenuBarLabels_data()
+{
+	QTest::addColumn<QString>("base");
+	QTest::addColumn<QPalette>("palette");
+	QTest::addColumn<bool>("selected");
+	QTest::addColumn<bool>("active");
+	QStringList styles = QStyleFactory::keys();
+	styles << "blank-menu-backend";
+	for (const auto &base : styles) {
+		for (const auto &mode : {QString("light"), QString("dark"), QString("stale-palette")}) {
+			QPalette palette = mode == "light" ? QET::Palette::fusionLight() : QET::Palette::fusionDark();
+			if (mode == "stale-palette") {
+				palette.setColor(QPalette::WindowText, palette.color(QPalette::Window));
+				palette.setColor(QPalette::HighlightedText, palette.color(QPalette::Highlight));
+			}
+			for (bool selected : {false, true}) {
+				for (bool active : {false, true}) {
+					const QString name = base + '-' + mode + (selected ? "-selected" : "-normal")
+					                     + (active ? "-active" : "-inactive");
+					QTest::newRow(qPrintable(name)) << base << palette << selected << active;
+				}
+			}
+		}
+	}
+}
+
+void tst_qeticons::windowsMenuBarLabels()
+{
+#ifndef Q_OS_WIN
+	QSKIP("Windows menu rendering fallback; other platforms keep their native style");
+#else
+	QFETCH(QString, base);
+	QFETCH(QPalette, palette);
+	QFETCH(bool, selected);
+	QFETCH(bool, active);
+	QETStyle style(base == "blank-menu-backend" ? static_cast<QStyle *>(new BlankMenuBackend)
+	                                           : QStyleFactory::create(base));
+	QStyleOptionMenuItem option;
+	option.palette = palette;
+	option.palette.setCurrentColorGroup(active ? QPalette::Active : QPalette::Inactive);
+	option.state = QStyle::State_Enabled;
+	if (active) option.state |= QStyle::State_Active;
+	if (selected) option.state |= QStyle::State_Selected | QStyle::State_Sunken;
+	option.rect = QRect(0, 0, 200, 32);
+	option.font = QApplication::font("QMenuBar");
+	option.menuItemType = QStyleOptionMenuItem::Normal;
+	const auto render = [&](const QString &text) {
+		QImage image(250, 40, QImage::Format_ARGB32_Premultiplied);
+		image.setDevicePixelRatio(1.25);
+		image.fill(Qt::magenta);
+		QPainter painter(&image);
+		option.text = text;
+		style.drawControl(QStyle::CE_MenuBarItem, &option, &painter);
+		return image;
+	};
+	const QImage blank = render(QString());
+	const QImage label = render(QStringLiteral("&Arquivo — Edição"));
+	QET::Test::dump(label, "windows-menu-125-percent");
+	int readable_text_pixels = 0;
+	for (int y = 0; y < label.height(); ++y) {
+		for (int x = 0; x < label.width(); ++x) {
+			if (label.pixel(x, y) != blank.pixel(x, y)
+			    && QET::Palette::contrastRatio(label.pixelColor(x, y), blank.pixelColor(x, y)) >= 4.5)
+				++readable_text_pixels;
+		}
+	}
+	QVERIFY2(readable_text_pixels >= 30, "Menu label is blank, clipped or has insufficient contrast at 125%");
+	const auto face = palette.color(selected ? QPalette::Highlight : QPalette::Window);
+	QCOMPARE(blank.pixelColor(0, 0), face);
+#endif
+}
+
+void tst_qeticons::windowsPopupLabels_data()
+{
+	QTest::addColumn<QString>("base");
+	QTest::addColumn<QPalette>("palette");
+	QTest::addColumn<QString>("kind");
+	QTest::addColumn<bool>("selected");
+	QStringList styles = QStyleFactory::keys();
+	styles << "blank-menu-backend";
+	for (const auto &base : styles) {
+		for (const QString &mode : {QString("light"), QString("dark"), QString("stale-light"),
+		                          QString("stale-dark"), QString("light-with-dark-disabled"),
+		                          QString("transparent-light")}) {
+			QPalette palette = mode.contains("dark") && !mode.startsWith("light")
+				? QET::Palette::fusionDark() : QET::Palette::fusionLight();
+			if (mode.startsWith("stale")) {
+				palette.setColor(QPalette::Text, palette.color(QPalette::Window));
+				palette.setColor(QPalette::HighlightedText, palette.color(QPalette::Highlight));
+			}
+			if (mode == "light-with-dark-disabled") {
+				palette.setColor(QPalette::Disabled, QPalette::Window, QColor(31, 31, 31));
+				palette.setColor(QPalette::Disabled, QPalette::Base, QColor(18, 18, 18));
+				palette.setColor(QPalette::Disabled, QPalette::Text, QColor(175, 175, 175));
+			}
+			if (mode == "transparent-light") {
+				palette.setColor(QPalette::Text, QColor(0, 0, 0, 0));
+				palette.setColor(QPalette::HighlightedText, QColor(255, 255, 255, 0));
+			}
+			for (const QString &kind : {QString("shortcut"), QString("plain"), QString("submenu"),
+			                          QString("check"), QString("radio"), QString("disabled")}) {
+				for (bool selected : {false, true}) {
+					if (kind == "disabled" && selected) continue;
+					const QString name = base + '-' + mode + '-' + kind + (selected ? "-selected" : "-normal");
+					QTest::newRow(qPrintable(name)) << base << palette << kind << selected;
+				}
+			}
+		}
+	}
+}
+
+void tst_qeticons::windowsPopupLabels()
+{
+#ifndef Q_OS_WIN
+	QSKIP("Windows popup rendering; other platforms retain their native menu style");
+#else
+	QFETCH(QString, base);
+	QFETCH(QPalette, palette);
+	QFETCH(QString, kind);
+	QFETCH(bool, selected);
+	QETStyle style(base == "blank-menu-backend" ? static_cast<QStyle *>(new BlankMenuBackend)
+	                                           : QStyleFactory::create(base));
+	QMenu menu;
+	menu.setStyle(&style);
+	QStyleOptionMenuItem option;
+	option.palette = palette;
+	option.state = QStyle::State_Active;
+	const bool enabled = kind != "disabled";
+	if (enabled) option.state |= QStyle::State_Enabled;
+	if (selected) option.state |= QStyle::State_Selected;
+	option.palette.setCurrentColorGroup(enabled ? QPalette::Active : QPalette::Disabled);
+	option.font = QApplication::font("QMenu");
+	option.fontMetrics = QFontMetrics(option.font);
+	option.rect = QRect(0, 0, 360, 32);
+	option.menuItemType = kind == "submenu" ? QStyleOptionMenuItem::SubMenu : QStyleOptionMenuItem::Normal;
+	option.checkType = kind == "check" ? QStyleOptionMenuItem::NonExclusive
+	                 : kind == "radio" ? QStyleOptionMenuItem::Exclusive : QStyleOptionMenuItem::NotCheckable;
+	option.menuHasCheckableItems = kind == "check" || kind == "radio";
+	const bool shortcut = kind == "shortcut" || kind == "check" || kind == "disabled";
+	option.reservedShortcutWidth = shortcut ? 105 : 0;
+	if (kind == "shortcut" || kind == "submenu" || kind == "disabled") {
+		QPixmap icon(16, 16); icon.fill(QColor(0, 150, 60)); option.icon = QIcon(icon);
+		option.maxIconWidth = 24;
+	}
+	const auto size = style.sizeFromContents(QStyle::CT_MenuItem, &option,
+	                                       QSize(200, option.fontMetrics.height()), &menu);
+	QVERIFY(size.height() >= option.fontMetrics.height());
+	const auto render = [&](const QString &text, bool checked) {
+		QImage image(450, 40, QImage::Format_ARGB32_Premultiplied);
+		image.setDevicePixelRatio(1.25);
+		image.fill(Qt::magenta);
+		QPainter painter(&image);
+		option.text = text;
+		option.checked = checked;
+		option.state.setFlag(QStyle::State_On, checked);
+		style.drawControl(QStyle::CE_MenuItem, &option, &painter, &menu);
+		return image;
+	};
+	const QString text = QStringLiteral("Texto visível do menu") + (shortcut ? QStringLiteral("\tCtrl+O") : QString());
+	const QImage blank = render(QString(), true);
+	const QImage label = render(text, true);
+	QET::Test::dump(label, "windows-popup-125-percent");
+	const auto textPixels = [&](QRect area, double ratio) {
+		int count = 0;
+		for (int y = area.top(); y <= area.bottom(); ++y)
+			for (int x = area.left(); x <= area.right(); ++x)
+				if (label.pixel(x, y) != blank.pixel(x, y)
+				    && QET::Palette::contrastRatio(label.pixelColor(x, y), blank.pixelColor(x, y)) >= ratio)
+					++count;
+		return count;
+	};
+	const double ratio = enabled ? 4.5 : 1.5;
+	QVERIFY2(textPixels(QRect(40, 4, 210, 32), ratio) >= 20,
+	         "Popup item label is blank or unreadable at 125%; icons and arrows do not count");
+	if (shortcut)
+		QVERIFY2(textPixels(QRect(300, 4, 138, 32), ratio) >= 15, "Popup shortcut text is unreadable");
+	QColor face = palette.color(QPalette::Active, selected ? QPalette::Highlight : QPalette::Window);
+	face.setAlpha(255);
+	QCOMPARE(blank.pixelColor(225, 20), face);
+	if (kind == "check" || kind == "radio") {
+		const QImage unchecked = render(text, false);
+		int changed = 0;
+		for (int y = 0; y < 40; ++y)
+			for (int x = 0; x < 40; ++x)
+				if (unchecked.pixel(x, y) != label.pixel(x, y)) ++changed;
+		QVERIFY2(changed >= 5, "Popup check/radio state was lost");
+	}
+#endif
 }
 
 /**

@@ -23,6 +23,7 @@
 #include "shapetransform.h"
 
 #include <QPen>
+#include <QPicture>
 #include <QUuid>
 #include <optional>
 #include <utility>
@@ -153,7 +154,11 @@ class QetShapeItem : public QetGraphicsItem
 		int type() const override { return Type; }
 
 			///METHODS
-		QPen pen() const {return m_pen;}
+        // A documentary pictogram records the real QET vector drawing.
+        // It is a graphic shape, with no electrical terminals or BOM row.
+        void setDocumentaryVector(const QPicture &picture) {m_documentaryVector=picture;update();}
+        bool hasDocumentaryVector() const {return !m_documentaryVector.isNull();}
+        QPen pen() const {return m_pen;}
 		void setPen(const QPen &pen);
 		QBrush brush() const {return m_brush;}
 		void setBrush(const QBrush &brush);
@@ -327,6 +332,7 @@ class QetShapeItem : public QetGraphicsItem
 		QPolygonF	 m_polygon, m_old_polygon;
 		bool		 m_hovered;
 		int		 m_vector_index;
+		QPicture m_documentaryVector;
 		bool		 m_closed = false,
 				 m_modifie_radius_equaly = false;
 		QVector<QetGraphicsHandlerItem *> m_handler_vector;

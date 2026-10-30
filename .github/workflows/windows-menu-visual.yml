@@ -1,0 +1,66 @@
+name: Windows menu visual capture
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/windows-menu-visual.yml'
+      - 'misc/capture_windows_menus.py'
+  workflow_dispatch:
+    inputs:
+      package_run_id:
+        description: Successful industrial Windows build run to inspect
+        required: true
+        default: '40936950905'
+        type: string
+      diagnostic_baseline:
+        description: Capture failures in an older package without treating them as passed validation
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: windows-menu-capture-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  capture:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install pillow==11.3.0 pywinauto==0.6.9
+      - uses: actions/download-artifact@v4
+        with:
+          name: QET-WINDOWS-COMPILADO-success
+          path: package
+          run-id: ${{ inputs.package_run_id || '40936950905' }}
+          github-token: ${{ github.token }}
+      - name: Use Windows dark application theme
+        shell: pwsh
+        run: |
+          $theme = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize'
+          New-Item -Path $theme -Force | Out-Null
+          Set-ItemProperty -Path $theme -Name AppsUseLightTheme -Type DWord -Value 0
+          Set-ItemProperty -Path $theme -Name SystemUsesLightTheme -Type DWord -Value 0
+      - run: python misc/capture_windows_menus.py package menu-captures ${{ inputs.diagnostic_baseline && '--allow-unreadable' || '' }}
+      - name: Preserve visual evidence in a separate branch
+        if: always()
+        shell: pwsh
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -f menu-captures
+          git commit -m 'Windows menu screenshots for run ${{ github.run_id }}'
+          git push origin HEAD:refs/heads/validation/windows-menus-${{ github.run_id }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: QET-Windows-menu-captures
+          path: menu-captures/
+          if-no-files-found: error

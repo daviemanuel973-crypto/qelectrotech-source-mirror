@@ -781,6 +781,14 @@ void Conductor::mouseReleaseEvent(QGraphicsSceneMouseEvent *event)
 */
 void Conductor::hoverEnterEvent(QGraphicsSceneHoverEvent *event) {
 	Q_UNUSED(event);
+	// Native inspection without changing wire text, drawing or geometry.
+	const ConductorProperties p = properties();
+	QStringList lines;
+	if (!p.m_function.isEmpty()) lines << QObject::tr("Função: %1").arg(p.m_function);
+	if (!p.m_wire_section.isEmpty()) lines << QObject::tr("Seção: %1").arg(p.m_wire_section);
+	if (!p.m_wire_color.isEmpty()) lines << QObject::tr("Cor: %1").arg(p.m_wire_color);
+	if (!p.m_tension_protocol.isEmpty()) lines << QObject::tr("Tensão/protocolo: %1").arg(p.m_tension_protocol);
+	setToolTip(lines.join(QStringLiteral("\n")));
 	m_mouse_over = true;
 	update();
 }
@@ -1815,6 +1823,25 @@ void Conductor::setPropertyToPotential(const ConductorProperties &property,
 void Conductor::setProperties(const ConductorProperties &property)
 {
 	if (m_properties == property) return;
+
+	// Updating only electrical metadata must not reposition existing labels.
+	// A conductor with a formula still needs its label refreshed normally.
+	if (m_properties.m_formula.isEmpty() && property.m_formula.isEmpty())
+	{
+		ConductorProperties same_visual = m_properties;
+		same_visual.m_function = property.m_function;
+		same_visual.m_wire_color = property.m_wire_color;
+		same_visual.m_wire_section = property.m_wire_section;
+		same_visual.m_sizing_data=property.m_sizing_data;
+		same_visual.m_tension_protocol = property.m_tension_protocol;
+		if (same_visual == property)
+		{
+			m_properties = property;
+			storeProperties();
+			emit propertiesChange();
+			return;
+		}
+	}
 
 	QString formula = m_properties.m_formula;
 	m_properties = property;

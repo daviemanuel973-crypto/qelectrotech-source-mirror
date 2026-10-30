@@ -40,15 +40,12 @@ jobs:
             mingw-w64-ucrt-x86_64-angleproject
             mingw-w64-ucrt-x86_64-qt6-declarative
 
-      - name: Aplicar alteracao nativa de identificacao de fios
+      - name: Conferir integração nativa
         shell: msys2 {0}
         run: |
-          set -euo pipefail
-          cd "$GITHUB_WORKSPACE"
-          git apply --check qet-native-forca-comando.patch
-          git apply qet-native-forca-comando.patch
+          test -s sources/automation/autowireproperties.h
           grep -q 'AutoWireProperties::run' sources/qetdiagrameditor.cpp
-          echo 'Patch integrado ao menu Editar.'
+          grep -q 'IndustrialDocumentation::generateSheets' sources/qetdiagrameditor.cpp
 
       - name: Compilar o executavel QElectroTech.exe
         shell: msys2 {0}
@@ -62,7 +59,7 @@ jobs:
             -DQT_VERSION_MAJOR=6 \
             -DBUILD_WITH_KF=ON \
             -DBUILD_KF=OFF \
-            -DPACKAGE_TESTS=OFF \
+            -DPACKAGE_TESTS=ON \
             -DCMAKE_POLICY_DEFAULT_CMP0077=NEW \
             -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
             -DQET_EXPORT_PROJECT_DB=ON \
@@ -82,7 +79,7 @@ jobs:
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE/build"
-          ctest --output-on-failure --timeout 300
+          ctest --output-on-failure --timeout 300 --no-tests=error
 
       - name: Gerar pasta portatil Windows com dependencias
         shell: msys2 {0}
@@ -113,7 +110,10 @@ jobs:
           cp -r "$GITHUB_WORKSPACE/titleblocks" "$DEST/titleblocks"
           cp -r "$GITHUB_WORKSPACE/fonts" "$DEST/fonts" || true
           cp -r "$GITHUB_WORKSPACE/examples" "$DEST/examples" || true
-          cp "$GITHUB_WORKSPACE/misc/Lancer QET_qt6.bat" "$DEST/Abrir QElectroTech.bat"
+          cp "$GITHUB_WORKSPACE/misc/Abrir-QET-Industrial.bat" "$DEST/Abrir QElectroTech.bat"
+          mkdir -p "$DEST/validation" "$DEST/documentacao"
+          cp "$GITHUB_WORKSPACE/build/lazy-folios/results.txt" "$DEST/validation/" 2>/dev/null || true
+          cp "$GITHUB_WORKSPACE/build/lazy-folios/"QET-Industrial-* "$DEST/documentacao/" 2>/dev/null || true
           find "$GITHUB_WORKSPACE/build/lang" -maxdepth 1 -name 'qet_*.qm' -exec cp {} "$DEST/lang/" \; 2>/dev/null || true
           for file in "$GITHUB_WORKSPACE"/LICENSE* "$GITHUB_WORKSPACE"/ELEMENTS.LICENSE; do
             test -f "$file" && cp "$file" "$DEST/" || true
@@ -128,7 +128,7 @@ jobs:
           name: QET-ForcaComando-Windows-Portatil
           path: QET-ForcaComando-Portatil/
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 30
 
       - name: Guardar logs se a compilacao falhar
         if: failure()
