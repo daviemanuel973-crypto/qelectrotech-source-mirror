@@ -325,6 +325,7 @@ QList<QPair<QString, QString>> ConductorProperties::attributes() const
 	add("tension_protocol", m_tension_protocol);
 	add("conductor_color", m_wire_color);
 	add("conductor_section", m_wire_section);
+	if(!m_sizing_data.isEmpty())add("qet_sizing_data",m_sizing_data);
 	add("numsize", QString::number(text_size));
 	add("condsize", QString::number(cond_size));
 	add("displaytext", QString::number(m_show_text));
@@ -387,6 +388,7 @@ void ConductorProperties::fromXml(QDomElement &e)
 	m_tension_protocol   = e.attribute("tension_protocol");
 	m_wire_color         = e.attribute("conductor_color");
 	m_wire_section       = e.attribute("conductor_section");
+	m_sizing_data=e.attribute("qet_sizing_data");
 	text_size            = e.attribute("numsize", QString::number(9)).toInt();
 	cond_size            = e.attribute("condsize", QString::number(1)).toDouble();
 	m_show_text          = e.attribute("displaytext", QString::number(1)).toInt();
@@ -430,6 +432,7 @@ void ConductorProperties::toSettings(QSettings &settings, const QString &prefix)
 	settings.setValue(prefix + "tension_protocol", m_tension_protocol);
 	settings.setValue(prefix + "conductor_color", m_wire_color);
 	settings.setValue(prefix + "conductor_section", m_wire_section);
+	settings.setValue(prefix + "qet_sizing_data",m_sizing_data);
 	settings.setValue(prefix + "textsize", QString::number(text_size));
 	settings.setValue(prefix + "size", QString::number(cond_size));
 	settings.setValue(prefix + "displaytext", m_show_text);
@@ -474,6 +477,7 @@ void ConductorProperties::fromSettings(QSettings &settings, const QString &prefi
 	m_tension_protocol   = settings.value(prefix + "tension_protocol", "").toString();
 	m_wire_color         = settings.value(prefix + "conductor_color", "").toString();
 	m_wire_section       = settings.value(prefix + "conductor_section", "").toString();
+	m_sizing_data=settings.value(prefix+"qet_sizing_data","").toString();
 	text_size            = settings.value(prefix + "textsize", "7").toInt();
 		// Saved with QString::number(cond_size): a decimal such as 1.4,
 		// which toInt() would read as 0.
@@ -533,6 +537,7 @@ void ConductorProperties::applyForEqualAttributes(QList<ConductorProperties> lis
 		m_tension_protocol   = cp.m_tension_protocol;
 		m_wire_color         = cp.m_wire_color;
 		m_wire_section       = cp.m_wire_section;
+		m_sizing_data=cp.m_sizing_data;
 		text_size            = cp.text_size;
 		cond_size            = cp.cond_size;
 		m_show_text          = cp.m_show_text;
@@ -832,6 +837,7 @@ void ConductorProperties::applyChanges(const ConductorProperties &before,
 	take(m_tension_protocol,     before.m_tension_protocol,     after.m_tension_protocol);
 	take(m_wire_color,           before.m_wire_color,           after.m_wire_color);
 	take(m_wire_section,         before.m_wire_section,         after.m_wire_section);
+	take(m_sizing_data,before.m_sizing_data,after.m_sizing_data);
 	take(m_show_text,            before.m_show_text,            after.m_show_text);
 	take(text_size,              before.text_size,              after.text_size);
 	take(cond_size,              before.cond_size,              after.cond_size);
@@ -916,6 +922,7 @@ bool ConductorProperties::operator==(const ConductorProperties &other) const
 		other.m_tension_protocol == m_tension_protocol &&\
 		other.m_wire_color == m_wire_color && \
 		other.m_wire_section == m_wire_section && \
+		other.m_sizing_data == m_sizing_data && \
 		other.m_show_text == m_show_text &&\
 		other.text_size == text_size &&\
 		other.cond_size == cond_size &&\

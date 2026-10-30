@@ -49,6 +49,11 @@ ElementsCollectionModel::ElementsCollectionModel(QObject *parent) :
 */
 ElementsCollectionModel::~ElementsCollectionModel()
 {
+	cancelLoading();
+}
+
+void ElementsCollectionModel::cancelLoading()
+{
 	// Without cancel(), the wait below runs the whole queued
 	// QtConcurrent::map() to completion, so closing this dialog on a
 	// large collection blocks until every remaining item has been
@@ -56,8 +61,13 @@ ElementsCollectionModel::~ElementsCollectionModel()
 	// stop the work. cancel() drops the not-yet-started items so the
 	// wait that follows (still needed, so an in-flight item can't
 	// dereference this object after it's gone) is short.
+	// A finished signal from an older load must not apply deferred values
+	// while the next load is still writing them on worker threads.
+	if (m_loading_watcher)
+		disconnect(m_loading_watcher, nullptr, this, nullptr);
 	m_future.cancel();
 	m_future.waitForFinished();
+	delete m_loading_watcher.data();
 }
 
 /**
@@ -287,6 +297,7 @@ void ElementsCollectionModel::loadCollections(bool common_collection,
 											  bool custom_collection,
 											  QList<QETProject *> projects)
 {
+	cancelLoading();
 	clear();
 
 	m_items_list_to_setUp.clear();
@@ -307,7 +318,8 @@ void ElementsCollectionModel::loadCollections(bool common_collection,
 		m_items_list_to_setUp.append(projectItems(project));
 	}
 
-	auto *watcher = new QFutureWatcher<void>();
+	auto *watcher = new QFutureWatcher<void>(this);
+	m_loading_watcher = watcher;
 	connect(watcher, &QFutureWatcher<void>::progressValueChanged,
 			this, &ElementsCollectionModel::loadingProgressValueChanged);
 	connect(watcher, &QFutureWatcher<void>::progressRangeChanged,
