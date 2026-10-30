@@ -10,8 +10,12 @@ on:
       package_run_id:
         description: Successful industrial Windows build run to inspect
         required: true
-        default: '40129192499'
+        default: '40936950905'
         type: string
+      diagnostic_baseline:
+        description: Capture failures in an older package without treating them as passed validation
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -35,7 +39,7 @@ jobs:
         with:
           name: QET-WINDOWS-COMPILADO-success
           path: package
-          run-id: ${{ inputs.package_run_id || '40129192499' }}
+          run-id: ${{ inputs.package_run_id || '40936950905' }}
           github-token: ${{ github.token }}
       - name: Use Windows dark application theme
         shell: pwsh
@@ -44,7 +48,7 @@ jobs:
           New-Item -Path $theme -Force | Out-Null
           Set-ItemProperty -Path $theme -Name AppsUseLightTheme -Type DWord -Value 0
           Set-ItemProperty -Path $theme -Name SystemUsesLightTheme -Type DWord -Value 0
-      - run: python misc/capture_windows_menus.py package menu-captures
+      - run: python misc/capture_windows_menus.py package menu-captures ${{ inputs.diagnostic_baseline && '--allow-unreadable' || '' }}
       - name: Preserve visual evidence in a separate branch
         if: always()
         shell: pwsh

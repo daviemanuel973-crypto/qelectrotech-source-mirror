@@ -68,14 +68,53 @@ def process_windows(pid):
     return [desktop.window(handle=handle).wrapper_object() for handle in handles]
 
 
-def capture(root, output, style, language, scale):
+def verify_popup_text(screen, popups, output, scale):
+    rows = []
+    tree = []
+    for popup in popups:
+        accessible = Desktop(backend='uia').window(handle=popup.handle)
+        for item in accessible.descendants():
+            rect = item.rectangle()
+            tree.append(str(item.element_info) + ' ' + str(rect))
+            if not item.window_text() or not (8 < rect.height() < 80 * float(scale)):
+                continue
+            if item.element_info.control_type != 'MenuItem' and item.element_info.class_name != 'QAction':
+                continue
+            # Only the label column: an icon, submenu arrow or shortcut must
+            # never make a completely blank item label pass this check.
+            left = max(0, rect.left + round(32 * float(scale)))
+            right = min(screen.width, rect.left + round(rect.width() * .55))
+            if right <= left:
+                continue
+            crop = screen.crop((left, max(0, rect.top + 3), right,
+                                min(screen.height, rect.bottom - 3))).convert('RGB')
+            colors = Counter(crop.getdata())
+            background = colors.most_common(1)[0][0]
+            minimum = 4.5 if item.is_enabled() else 1.5
+            pixels = sum(n for color, n in colors.items() if contrast(color, background) >= minimum)
+            rows.append({'title': item.window_text(), 'enabled': item.is_enabled(),
+                         'readable_label_pixels': pixels,
+                         'label_rect': [left, rect.top + 3, right, rect.bottom - 3]})
+    output.write_text('\n'.join(tree), encoding='utf-8')
+    (output.with_suffix('.json')).write_text(json.dumps(rows, indent=2), encoding='utf-8')
+    if len(rows) < 5:
+        raise RuntimeError('Expected at least five actual popup menu labels')
+    invisible = [row['title'] for row in rows if row['readable_label_pixels'] < 10]
+    if invisible:
+        raise RuntimeError('Blank popup item labels: ' + ', '.join(invisible))
+    return rows
+
+
+def capture(root, output, style, language, scale, application_color=''):
     output.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='qet menu visual ') as work:
         work = Path(work)
         settings = work / 'settings' / 'QElectroTech'
         settings.mkdir(parents=True)
-        (settings / 'QElectroTech.ini').write_text(
-            '[General]\nlang=' + language + '\n', encoding='utf-8')
+        ini = '[General]\nlang=' + language + '\n'
+        if application_color:
+            ini += 'usesystemcolors=false\ncustomapplicationcolor=' + application_color + '\n'
+        (settings / 'QElectroTech.ini').write_text(ini, encoding='utf-8')
         project = work / 'menus.qet'
         shutil.copyfile(root / 'examples' / '741.qet', project)
         env = os.environ.copy()
@@ -148,6 +187,8 @@ def capture(root, output, style, language, scale):
                 keyboard_popups = len(popup_windows())
                 if not keyboard_popups:
                     raise RuntimeError('Alt followed by Down did not open a Windows menu')
+                keyboard_labels = verify_popup_text(ImageGrab.grab(all_screens=True), popup_windows(),
+                                                     output / '02-popup-uia.txt', scale)
                 window.type_keys('{ESC}{ESC}')
                 # The menu row starts just below the native title bar. Record
                 # both client and window geometry to make the click auditable.
@@ -162,13 +203,17 @@ def capture(root, output, style, language, scale):
                 mouse_popups = len(popup_windows())
                 if not mouse_popups:
                     raise RuntimeError('Clicking the visible first title did not open a Windows menu')
+                mouse_labels = verify_popup_text(ImageGrab.grab(all_screens=True), popup_windows(),
+                                                  output / '03-popup-uia.txt', scale)
                 window.type_keys('{ESC}{ESC}')
                 details = {
                     'platform': 'Windows', 'style_override': style or 'default',
                     'qt_scale_factor': scale,
+                    'application_color': application_color or 'system',
                     'os_version': platform.platform(),
                     'menu_labels': labels, 'keyboard_popup_windows': keyboard_popups,
                     'mouse_popup_windows': mouse_popups,
+                    'keyboard_popup_labels': keyboard_labels, 'mouse_popup_labels': mouse_labels,
                     'language': language, 'window_title': window.window_text(),
                     'window_rect': [rect.left, rect.top, rect.right, rect.bottom],
                     'client_origin': [point.x, point.y],
@@ -191,14 +236,30 @@ if __name__ == '__main__':
     parser.add_argument('package', type=Path)
     parser.add_argument('output', type=Path)
     parser.add_argument('--scale', default='1.25')
+    parser.add_argument('--allow-unreadable', action='store_true',
+                        help='Diagnostic baseline only: retain failed captures without passing them')
     args = parser.parse_args()
     ctypes.windll.user32.SetProcessDPIAware()
-    for style, language in [('', 'en'), ('Fusion', 'en'), ('', 'pt_BR')]:
-        capture(args.package.resolve(), args.output / ((style or 'default') + '-' + language),
-                style, language, args.scale)
+    failures = []
+    cases = [('', 'en', ''), ('Fusion', 'en', ''), ('', 'pt_BR', ''),
+             ('', 'pt_BR', '#ffffff'), ('Fusion', 'pt_BR', '#ffffff'),
+             ('', 'pt_BR', '#303030')]
+    for style, language, color in cases:
+        name = (style or 'default') + '-' + language + ('-' + color[1:] if color else '')
+        output = args.output / name
+        try:
+            capture(args.package.resolve(), output, style, language, args.scale, color)
+        except Exception as error:
+            failure = {'case': name, 'error': str(error)}
+            failures.append(failure)
+            output.mkdir(parents=True, exist_ok=True)
+            (output / 'failure.json').write_text(json.dumps(failure, indent=2), encoding='utf-8')
+            print(json.dumps(failure), flush=True)
     info_path = args.package / 'validation' / 'build-info.json'
     if info_path.exists():
         info = json.loads(info_path.read_text(encoding='utf-8'))
-        info['packaged_windows_menu_render_and_input'] = 'passed'
+        info['packaged_windows_popup_text'] = 'failed' if failures else 'passed'
         info['menu_validation_scale_factor'] = args.scale
         info_path.write_text(json.dumps(info, indent=2), encoding='utf-8')
+    if failures and not args.allow_unreadable:
+        raise SystemExit('Popup text validation failed in ' + str(len(failures)) + ' cases')
